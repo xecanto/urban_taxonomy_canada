@@ -1,0 +1,289 @@
+.app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.map-container {
+  position: absolute;
+  inset: 0;
+}
+
+/* ── Panel wrappers (always rendered, GSAP-animated) ──── */
+.left-panel-wrapper {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  max-height: calc(100vh - 20px);
+  z-index: 10;
+}
+
+.right-panel-wrapper {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  height: calc(100vh - 20px);
+  z-index: 10;
+}
+
+/* ── Panels fill their wrapper ──────────────────────────── */
+.left-panel {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100vh - 20px);
+  overflow: hidden;
+}
+
+.right-panel {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Resize handles ─────────────────────────────────────── */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resize-handle::after {
+  content: "";
+  width: 3px;
+  height: 32px;
+  border-radius: 2px;
+  background: rgba(128, 128, 128, 0.15);
+  transition: background 0.2s, height 0.2s;
+}
+
+.resize-handle:hover::after,
+.resize-handle:active::after {
+  background: rgba(34, 139, 230, 0.5);
+  height: 48px;
+}
+
+.resize-handle-right {
+  right: -4px;
+}
+
+.resize-handle-left {
+  left: -4px;
+}
+
+/* ── Toggle tabs (visible when panel is closed) ─────────── */
+.panel-tab {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 56px;
+  opacity: 0.85;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.panel-tab:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.08);
+}
+
+.panel-tab.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) scale(0.8);
+}
+
+.panel-tab-left {
+  left: 4px;
+  border-radius: 0 8px 8px 0;
+}
+
+.panel-tab-right {
+  right: 4px;
+  border-radius: 8px 0 0 8px;
+}
+
+/* ── Layer order list ───────────────────────────────────── */
+.layer-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layer-order-item {
+  border-radius: 4px;
+  padding: 3px 6px;
+  transition: background 0.15s;
+}
+
+.layer-order-item:hover {
+  background: rgba(128, 128, 128, 0.08);
+}
+
+/* ── Legend ──────────────────────────────────────────────── */
+.legend-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, transform 0.1s;
+  user-select: none;
+}
+
+.legend-item:hover {
+  background: rgba(128, 128, 128, 0.15);
+  transform: scale(1.05);
+}
+
+.legend-item.dimmed {
+  opacity: 0.2;
+}
+
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.legend-count {
+  font-size: 9px;
+  color: var(--mantine-color-dimmed);
+  margin-left: 1px;
+}
+
+/* ── Stats bar ──────────────────────────────────────────── */
+.stats-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.stat-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.08);
+  white-space: nowrap;
+}
+
+.stat-chip .stat-value {
+  font-weight: 700;
+}
+
+/* ── Map hover tooltip ──────────────────────────────────── */
+.maplibregl-popup-content {
+  padding: 6px 10px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2) !important;
+  max-width: 220px !important;
+}
+
+.maplibregl-popup-tip {
+  display: none !important;
+}
+
+.map-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-tooltip-row .tt-key {
+  color: #888;
+  font-weight: 500;
+}
+
+.map-tooltip-row .tt-val {
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ── Loading overlay ────────────────────────────────────── */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+/* ── Range inputs ───────────────────────────────────────── */
+input[type="range"] {
+  height: 4px;
+  accent-color: #228be6;
+}
+
+/* ── D3 hierarchy SVG ───────────────────────────────────── */
+svg .link {
+  transition: stroke-opacity 0.2s;
+}
+
+svg .node {
+  transition: opacity 0.2s;
+}
+
+svg .node-label {
+  transition: fill 0.2s;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+svg .lens-group {
+  transition: opacity 0.25s ease-out;
+}
+
+/* ── Cluster stats table ────────────────────────────────── */
+.cluster-stats-table {
+  font-size: 10px;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cluster-stats-table th,
+.cluster-stats-table td {
+  padding: 2px 4px;
+  text-align: left;
+}
+
+.cluster-stats-table th {
+  font-weight: 600;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.cluster-stats-table tr:hover {
+  background: rgba(128, 128, 128, 0.05);
+}

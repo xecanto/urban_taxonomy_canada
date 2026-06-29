@@ -41,6 +41,7 @@ data/
 
 # QGIS project files
 qgis/
+arcgis/
 
 # Claude settings
 .claude/

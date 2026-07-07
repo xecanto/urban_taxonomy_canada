@@ -16,6 +16,7 @@ env/
 
 # Large data files
 outputs/
+outputs_buildings/
 *.fgb
 *.gpkg
 *.geojson

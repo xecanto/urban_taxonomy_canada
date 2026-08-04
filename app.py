@@ -15,7 +15,7 @@ from flask import Flask, jsonify, request, send_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_PMtiles = BASE_DIR / "outputs" / "11_exports" / "winnipeg.pmtiles"
+DEFAULT_PMtiles = BASE_DIR / "outputs_buildings" / "11_exports" / "winnipeg.pmtiles"
 
 
 def _resolve_pmtiles_path() -> Path:

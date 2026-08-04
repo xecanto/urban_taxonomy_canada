@@ -17,6 +17,7 @@ env/
 # Large data files
 outputs/
 outputs_buildings/
+outputs_*/
 *.fgb
 *.gpkg
 *.geojson
@@ -25,7 +26,7 @@ outputs_buildings/
 *.dbf
 *.prj
 *.cpg
-
+me/*
 # OS
 .DS_Store
 Thumbs.db

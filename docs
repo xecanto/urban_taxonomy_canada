@@ -1,0 +1,6 @@
+.venv\Scripts\python.exe scripts\run_pipeline_buildings.py            # full run, CHM included
+.venv\Scripts\python.exe scripts\run_pipeline_buildings.py --no-chm   # full run, CHM excluded
+.venv\Scripts\python.exe scripts\run_pipeline_buildings.py --start 9 --end 11   # rerun a subset
+
+
+cd C:/urban-form/urban_taxonomy && timeout 600 .venv/Scripts/python.exe scripts/run_pipeline_buildings.py --start 1 --end 1 --output-root outputs_smoketest 2>&1 | tail -80

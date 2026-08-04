@@ -1,14 +1,26 @@
 """Generate D3-compatible hierarchy tree JSON from the scipy linkage matrix + cluster mapping."""
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import json
 from pathlib import Path
 from scipy.cluster.hierarchy import to_tree
 
-OUT = Path("outputs/11_exports")
+OUT = Path("outputs_buildings/11_exports")
+HIER = Path("outputs_buildings/09_hierarchy")
 
-Z = np.load("outputs/09_hierarchy/linkage_matrix.npy")
-cm = pd.read_parquet("outputs/09_hierarchy/cluster_mapping.parquet")
+Z = np.load(HIER / "linkage_matrix.npy")
+cm = pd.read_parquet(HIER / "cluster_mapping.parquet")
+
+# Morphotope centroids (WGS84), keyed by the same morph id used in `cm.index`.
+# Used by the viewer's "Geographic" hierarchy layout.
+morph_geom = gpd.read_file(OUT / "winnipeg_morphotopes.geojson")[["morph", "geometry"]]
+morph_geom = morph_geom.set_index("morph")
+centroid_pts = morph_geom.geometry.to_crs(morph_geom.estimate_utm_crs()).centroid.to_crs(4326)
+centroids = {
+    morph_id: [round(pt.x, 6), round(pt.y, 6)]
+    for morph_id, pt in centroid_pts.items()
+}
 
 level_cols = sorted([c for c in cm.columns if c.startswith("level_")])
 
@@ -88,6 +100,7 @@ output = {
     "cluster_summary": cluster_summary,
     "levels": level_cols,
     "total_morphotopes": len(cm),
+    "centroids": centroids,
 }
 
 with open(OUT / "hierarchy_tree.json", "w") as f:

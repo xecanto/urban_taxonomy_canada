@@ -26,8 +26,17 @@ morph_labels = pd.read_parquet(
 
 buildings_wgs = buildings.to_crs("EPSG:4326")
 buildings_wgs["morphotope"] = morph_labels.reindex(buildings_wgs.index)
-for col in clusters.columns:
+
+# Buildings inherit their morphotope's official (mode-aggregated) level_N
+# labels from `morph`, not each building's own raw per-cell value from
+# `clusters` -- the raw per-cell value can differ within a single morphotope,
+# making buildings show colors that don't match their morphotope's color.
+morph_levels = morph.set_index("morph")[[c for c in morph.columns if c.startswith("level_")]]
+non_level_cols = [c for c in clusters.columns if not c.startswith("level_")]
+for col in non_level_cols:
     buildings_wgs[col] = clusters[col].reindex(buildings_wgs.index)
+for col in morph_levels.columns:
+    buildings_wgs[col] = buildings_wgs["morphotope"].map(morph_levels[col])
 
 keep = [
     "HEIGHT", "BLDG_POP", "morphotope", "final",

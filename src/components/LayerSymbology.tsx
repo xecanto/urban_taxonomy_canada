@@ -8,14 +8,14 @@ interface Props {
   label: string;
   symbology: LS;
   onChange: (s: LS) => void;
-  layerType: "morphotopes" | "buildings";
+  layerType: "buildings";
   levelOptions: { value: string; label: string }[];
 }
 
 function buildStyleJSON(symbology: LS, layerType: string) {
   return JSON.stringify({
     layer: layerType,
-    colorBy: symbology.colorBy,
+    colorBy: symbology.level,
     colorRamp: symbology.ramp,
     opacity: symbology.opacity,
     visible: symbology.visible,
@@ -23,14 +23,6 @@ function buildStyleJSON(symbology: LS, layerType: string) {
 }
 
 export default function LayerSymbologyPanel({ label, symbology, onChange, layerType, levelOptions }: Props) {
-  const extraOptions = layerType === "buildings"
-    ? [
-        { value: "HEIGHT", label: "Building Height" },
-        { value: "BLDG_POP", label: "Population" },
-        { value: "solid", label: "Solid Color" },
-      ]
-    : [];
-  const colorOptions = [...levelOptions, ...extraOptions];
   const styleJSON = buildStyleJSON(symbology, layerType);
 
   return (
@@ -56,10 +48,11 @@ export default function LayerSymbologyPanel({ label, symbology, onChange, layerT
 
       <Select
         label="Color by"
-        data={colorOptions}
-        value={symbology.colorBy}
-        onChange={(v) => v && onChange({ ...symbology, colorBy: v })}
+        data={levelOptions}
+        value={symbology.level}
+        onChange={(v) => v && onChange({ ...symbology, level: v })}
         size="xs"
+        allowDeselect={false}
       />
 
       <Select

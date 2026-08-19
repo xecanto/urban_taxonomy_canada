@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist -b gh-pages"
+    "deploy": "gh-pages -d dist -b gh-pages --no-history --dotfiles --nojekyll"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

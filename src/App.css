@@ -19,12 +19,17 @@
   z-index: 10;
 }
 
+/* Small floating corner overlay, not a docked sidebar — sized to comfortably
+   fit the circular layout (HierarchyView's own default) without needing to
+   be resizable. Lifted clear of MapLibre's attribution strip at the very
+   bottom of the map. */
 .right-panel-wrapper {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  height: calc(100vh - 20px);
-  z-index: 10;
+  bottom: 44px;
+  right: 16px;
+  width: 320px;
+  height: 320px;
+  z-index: 8;
 }
 
 /* ── Panels fill their wrapper ──────────────────────────── */
@@ -35,12 +40,25 @@
   overflow: hidden;
 }
 
+/* Translucent backing (not a full opaque card) so the tree stays legible
+   over any basemap while still reading as a map overlay, not a docked panel.
+   Shape follows the layout it's holding: a true circle around the circular
+   dendrogram (only looks right because the wrapper is square there), a
+   rounded box around the wider rectangular one. */
 .right-panel {
   width: 100%;
   height: 100%;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+  background: rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(2px);
+  transition: border-radius 0.2s;
+}
+
+.right-panel-circle {
+  border-radius: 50%;
+}
+
+.right-panel-box {
+  border-radius: 16px;
 }
 
 /* ── Resize handles ─────────────────────────────────────── */
@@ -133,34 +151,49 @@
   background: rgba(128, 128, 128, 0.08);
 }
 
-/* ── Legend ──────────────────────────────────────────────── */
+/* ── Legend (vertical list, QGIS/ArcGIS layers-panel style) ── */
 .legend-grid {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  max-height: 220px;
+  flex-direction: column;
+  max-height: 320px;
   overflow-y: auto;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  padding: 2px 5px;
-  border-radius: 4px;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: 3px;
   cursor: pointer;
-  transition: opacity 0.15s, background 0.15s, transform 0.1s;
+  transition: opacity 0.15s, background 0.15s;
   user-select: none;
 }
 
 .legend-item:hover {
   background: rgba(128, 128, 128, 0.15);
-  transform: scale(1.05);
 }
 
 .legend-item.dimmed {
-  opacity: 0.2;
+  opacity: 0.35;
+}
+
+.legend-item-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.legend-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
 }
 
 .legend-swatch {
@@ -169,6 +202,14 @@
   border-radius: 3px;
   flex-shrink: 0;
   border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+/* Group header row (drilled cluster): no single color applies to it
+   anymore since its buildings are now split across its own children. */
+.legend-swatch-group {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--mantine-color-dimmed);
 }
 
 .legend-count {

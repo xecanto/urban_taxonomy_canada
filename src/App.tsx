@@ -1,24 +1,27 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import gsap from "gsap";
 import {
   SegmentedControl, Stack, Text, Paper, ScrollArea,
   ActionIcon, useMantineColorScheme, Badge, Table,
-  Divider, Group, Accordion, Switch, Tooltip,
+  Divider, Group, Accordion, Tooltip, Select,
 } from "@mantine/core";
 import {
-  IconSun, IconMoon, IconX, IconChevronUp, IconChevronDown,
+  IconSun, IconMoon, IconX,
   IconChevronLeft, IconChevronRight,
-  IconLink, IconLinkOff, IconTree, IconEye, IconEyeOff,
+  IconTree, IconEye, IconEyeOff, IconMapPin,
+  IconPlus, IconMinus,
 } from "@tabler/icons-react";
-import * as flatgeobuf from "flatgeobuf/lib/mjs/geojson.js";
+import { Protocol } from "pmtiles";
 import LayerSymbologyPanel from "./components/LayerSymbology";
 import HierarchyView from "./components/HierarchyView";
-import {
-  generateColors, buildMatchExpression, buildInterpolateExpression,
-} from "./utils/colors";
+import type { LayoutMode } from "./components/HierarchyView";
+import { generateColors } from "./utils/colors";
 import type { RampName } from "./utils/colors";
-import type { LayerSymbology, HierarchyData } from "./utils/types";
+import type { LayerSymbology, GlobalClusterSummary } from "./utils/types";
+import { buildLegendRows, clusterKey, parseClusterKey, buildTaxonomyTree } from "./utils/frontier";
+import { fetchRegions, pmtilesUrl } from "./config/regions";
+import type { RegionConfig } from "./config/regions";
 
 const BASEMAPS: Record<string, { name: string; url: string }> = {
   osm: { name: "OSM", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png" },
@@ -27,25 +30,21 @@ const BASEMAPS: Record<string, { name: string; url: string }> = {
   satellite: { name: "Satellite", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" },
 };
 
-async function loadFGB(url: string): Promise<GeoJSON.FeatureCollection> {
-  const resp = await fetch(url);
-  const buf = await resp.arrayBuffer();
-  const features: GeoJSON.Feature[] = [];
-  for await (const f of flatgeobuf.deserialize(new Uint8Array(buf))) {
-    features.push(f as GeoJSON.Feature);
-  }
-  return { type: "FeatureCollection", features };
+const TAXONOMY_SOURCE = "taxonomy";
+// Register the pmtiles:// protocol with MapLibre once at module load.
+maplibregl.addProtocol("pmtiles", new Protocol().tile);
+
+// Cluster ids for a level come from the global cluster summary (we can't
+// iterate all tile features to discover them). Returns sorted ids, e.g.
+// level_3 → [1..8]. Region-independent — see GlobalClusterSummary.
+function clusterIdsForLevel(summary: GlobalClusterSummary | null, level: string): number[] {
+  const entries = summary?.cluster_summary?.[level];
+  if (!entries) return [];
+  return entries.map(s => s.cluster).sort((a, b) => a - b);
 }
 
-function extractClusterIds(datasets: GeoJSON.FeatureCollection[], prop: string): number[] {
-  const set = new Set<number>();
-  for (const data of datasets) {
-    for (const f of data.features) {
-      const v = f.properties?.[prop];
-      if (v != null && v >= 0) set.add(v);
-    }
-  }
-  return Array.from(set).sort((a, b) => a - b);
+function bboxToBounds(bbox: [number, number, number, number]): maplibregl.LngLatBoundsLike {
+  return [[bbox[0], bbox[1]], [bbox[2], bbox[3]]];
 }
 
 // ── Resize hook ──────────────────────────────────────────
@@ -78,69 +77,92 @@ function useResize(
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
-  const morphDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
-  const bldgDataRef = useRef<GeoJSON.FeatureCollection | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
-  const morphSymRef = useRef<LayerSymbology>(null!);
+  const bldgSymRef = useRef<LayerSymbology>(null!);
+  const initializedRef = useRef(false);
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
 
   const [basemap, setBasemap] = useState("dark");
-  const [approach, setApproach] = useState<"fc" | "pct">("fc");
-  const [morphSym, setMorphSym] = useState<LayerSymbology>({
-    colorBy: "fc_level_3", ramp: "Bold", opacity: 0.65, visible: true,
-  });
   const [bldgSym, setBldgSym] = useState<LayerSymbology>({
-    colorBy: "fc_level_3", ramp: "Bold", opacity: 0.8, visible: true,
+    level: "level_3", ramp: "Bold", opacity: 0.8, visible: true,
   });
   const [clusterIds, setClusterIds] = useState<number[]>([]);
-  const [filterClusters, setFilterClusters] = useState<Set<number>>(new Set());
+  // Drilled-down clusters at bldgSym.level — e.g. {"level_3:3"} means
+  // cluster 3 has been expanded into its level_4 children in the legend/map.
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  // Filter selections are "level:cluster" keys (not bare numbers) because a
+  // drilled-down legend mixes clusters from more than one level at once.
+  const [filterClusters, setFilterClusters] = useState<Set<string>>(new Set());
   const [clickedProps, setClickedProps] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hierarchyData, setHierarchyData] = useState<HierarchyData | null>(null);
-  const [syncLevels, setSyncLevels] = useState(true);
-  const [layerOrder, setLayerOrder] = useState<string[]>(["buildings", "morphotopes"]);
+  const [globalClusterSummary, setGlobalClusterSummary] = useState<GlobalClusterSummary | null>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [featureCounts, setFeatureCounts] = useState({ morphotopes: 0, buildings: 0 });
-  const [centroids, setCentroids] = useState<Record<string, [number, number]>>({});
+  const [featureCounts, setFeatureCounts] = useState({ buildings: 0 });
+  const [regions, setRegions] = useState<RegionConfig[]>([]);
+  const [regionsError, setRegionsError] = useState<string | null>(null);
+  const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  // Lifted out of HierarchyView (rather than kept internal) because the
+  // floating widget's own size/shape — circle for circular, wider box for
+  // vertical — depends on it, and that's App's concern, not the tree's.
+  const [treeMode, setTreeMode] = useState<LayoutMode>("radial");
 
-  const FC_LEVELS = [
-    { value: "fc_level_1", label: "2 clusters (coarsest)" },
-    { value: "fc_level_2", label: "4 clusters" },
-    { value: "fc_level_3", label: "8 clusters" },
-    { value: "fc_level_4", label: "16 clusters" },
-    { value: "fc_level_5", label: "32 clusters" },
-    { value: "fc_level_6", label: "64 clusters" },
-    { value: "fc_level_7", label: "128 clusters (finest)" },
+  const levelOptions = [
+    { value: "level_1", label: "2 clusters (coarsest)" },
+    { value: "level_2", label: "4 clusters" },
+    { value: "level_3", label: "8 clusters" },
+    { value: "level_4", label: "16 clusters" },
+    { value: "level_5", label: "32 clusters" },
+    { value: "level_6", label: "64 clusters" },
+    { value: "level_7", label: "128 clusters (finest)" },
   ];
-  const PCT_LEVELS = [
-    { value: "pct_level_7", label: "~10 clusters (coarsest)" },
-    { value: "pct_level_6", label: "~19 clusters" },
-    { value: "pct_level_5", label: "~36 clusters" },
-    { value: "pct_level_4", label: "~53 clusters" },
-    { value: "pct_level_3", label: "~87 clusters" },
-    { value: "pct_level_2", label: "~121 clusters" },
-    { value: "pct_level_1", label: "~173 clusters (finest)" },
-  ];
-  const levelOptions = approach === "fc" ? FC_LEVELS : PCT_LEVELS;
-
-  const handleApproachChange = useCallback((v: string) => {
-    const a = v as "fc" | "pct";
-    setApproach(a);
-    const defaultLevel = a === "fc" ? "fc_level_3" : "pct_level_7";
-    setMorphSym(prev => ({ ...prev, colorBy: defaultLevel }));
-    setBldgSym(prev => ({ ...prev, colorBy: defaultLevel }));
-    setFilterClusters(new Set());
-  }, []);
 
   const leftResize = useResize(300, 220, 500, "left");
-  const rightResize = useResize(420, 280, 700, "right");
 
-  morphSymRef.current = morphSym;
+  bldgSymRef.current = bldgSym;
 
-  const morphColors = generateColors(clusterIds.length, morphSym.ramp as RampName);
+  // The legend, as an outline: every cluster at bldgSym.level, plus (for any
+  // the user has drilled into) their children nested underneath as further
+  // rows — see buildLegendRows. Region-independent.
+  const legendRows = useMemo(
+    () => buildLegendRows(bldgSym.level, expandedClusters, globalClusterSummary),
+    [bldgSym.level, expandedClusters, globalClusterSummary],
+  );
+  // Only non-expanded rows are actual map paint categories — an expanded
+  // (group header) row's buildings are now split across its own children.
+  const paintRows = legendRows.filter(r => !r.isExpanded);
+  const paintColors = generateColors(paintRows.length, bldgSym.ramp as RampName);
+  const colorForKey = new Map(paintRows.map((r, i) => [r.key, paintColors[i]]));
+
+  // The Hierarchy Tree panel's data — built once from the same global
+  // summary (see buildTaxonomyTree), so it's identical and always available
+  // for every region, unlike the old per-region dendrogram asset.
+  const taxonomyTree = useMemo(
+    () => (globalClusterSummary ? buildTaxonomyTree(globalClusterSummary) : null),
+    [globalClusterSummary],
+  );
+
+  // ── Load the region list once (name, province, bbox, building count) ──
+  useEffect(() => {
+    fetchRegions()
+      .then(setRegions)
+      .catch(e => setRegionsError(String(e)));
+  }, []);
+
+  // ── Load the global cluster summary once — region-independent, powers
+  // the legend/symbology regardless of which region is selected. ──
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}data/global_cluster_summary.json`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((summary: GlobalClusterSummary | null) => {
+        setGlobalClusterSummary(summary);
+        if (summary) setClusterIds(clusterIdsForLevel(summary, bldgSymRef.current.level));
+      })
+      .catch(() => {});
+  }, []);
 
   // ── Panel animations ───────────────────────────────────
   useEffect(() => {
@@ -167,77 +189,59 @@ export default function App() {
     }
   }, [rightOpen]);
 
-  // ── Level & ramp sync handlers ─────────────────────────
-  const handleMorphSymChange = useCallback((newSym: LayerSymbology) => {
-    setMorphSym(newSym);
-    if (syncLevels) {
-      setBldgSym(prev => {
-        const updates: Partial<LayerSymbology> = {};
-        if (newSym.colorBy.includes("level_") && newSym.colorBy !== prev.colorBy)
-          updates.colorBy = newSym.colorBy;
-        if (newSym.ramp !== prev.ramp) updates.ramp = newSym.ramp;
-        return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev;
-      });
-    }
-  }, [syncLevels]);
-
-  const handleBldgSymChange = useCallback((newSym: LayerSymbology) => {
-    setBldgSym(newSym);
-    if (syncLevels) {
-      setMorphSym(prev => {
-        const updates: Partial<LayerSymbology> = {};
-        if (newSym.colorBy.includes("level_") && newSym.colorBy !== prev.colorBy)
-          updates.colorBy = newSym.colorBy;
-        if (newSym.ramp !== prev.ramp) updates.ramp = newSym.ramp;
-        return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev;
-      });
-    }
-  }, [syncLevels]);
-
-  // ── Layer ordering ─────────────────────────────────────
-  const moveLayer = useCallback((key: string, dir: number) => {
-    setLayerOrder(prev => {
-      const idx = prev.indexOf(key);
-      const target = idx + dir;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[target]] = [next[target], next[idx]];
-      return next;
-    });
-  }, []);
-
-  // ── Multi-cluster filter ───────────────────────────────
-  const toggleClusterFilter = useCallback((id: number) => {
+  // ── Multi-cluster filter (keys are "level:cluster") ────
+  const toggleClusterFilter = useCallback((level: string, id: number) => {
+    const key = clusterKey(level, id);
     setFilterClusters(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
   }, []);
 
   const clearFilter = useCallback(() => setFilterClusters(new Set()), []);
 
+  // From the hierarchy tree, which is always drawn at one fixed level (no
+  // drill-down there), so every id it reports belongs to bldgSym.level.
   const handleBranchClick = useCallback((ids: number[]) => {
+    const keys = ids.map(id => clusterKey(bldgSymRef.current.level, id));
     setFilterClusters(prev => {
       const next = new Set(prev);
-      const allSelected = ids.every(id => next.has(id));
-      if (allSelected) ids.forEach(id => next.delete(id));
-      else ids.forEach(id => next.add(id));
+      const allSelected = keys.every(k => next.has(k));
+      if (allSelected) keys.forEach(k => next.delete(k));
+      else keys.forEach(k => next.add(k));
       return next;
     });
   }, []);
 
+  // ── Drill a legend entry in (expand to its children) or out (collapse) ──
+  const toggleExpand = useCallback((key: string) => {
+    setExpandedClusters(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+    // The set of visible clusters is about to change shape — stale filter
+    // selections referencing a cluster that just got replaced (or that just
+    // reappeared) would silently do nothing, so start clean.
+    setFilterClusters(new Set());
+  }, []);
+
   // ── Zoom to cluster extent ─────────────────────────────
-  const zoomToCluster = useCallback((clusterId: number) => {
+  // Bounds are computed from the building features in the vector tiles that
+  // are currently loaded, so this only covers whatever extent is in view.
+  const zoomToCluster = useCallback((level: string, clusterId: number) => {
     const map = mapRef.current;
-    const data = morphDataRef.current;
-    if (!map || !data) return;
-    const prop = morphSymRef.current.colorBy;
+    if (!map) return;
+    const feats = map.querySourceFeatures(TAXONOMY_SOURCE, {
+      sourceLayer: "buildings",
+      filter: ["==", ["get", level], clusterId],
+    });
     const bounds = new maplibregl.LngLatBounds();
     let found = false;
-    for (const f of data.features) {
-      if (f.properties?.[prop] !== clusterId || !f.geometry) continue;
+    for (const f of feats) {
       const geom = f.geometry as any;
+      if (!geom) continue;
       const rings: number[][][] =
         geom.type === "Polygon" ? geom.coordinates :
         geom.type === "MultiPolygon" ? geom.coordinates.flat() : [];
@@ -251,7 +255,67 @@ export default function App() {
     if (found) map.fitBounds(bounds, { padding: 60, duration: 1000 });
   }, []);
 
-  // ── Init map ───────────────────────────────────────────
+  // ── Buildings layer symbology ───────────────────────────
+  const applyBldgSymbology = useCallback(() => {
+    // Guard on mapReady, not just mapRef.current: the Map instance exists
+    // synchronously from the constructor, but calling getLayer()/style
+    // methods before its "load" event fires throws inside maplibre-gl
+    // rather than returning undefined.
+    if (!mapReady) return;
+    const map = mapRef.current;
+    if (!map?.getLayer("buildings-fill")) return;
+    map.setLayoutProperty("buildings-fill", "visibility", bldgSym.visible ? "visible" : "none");
+    map.setLayoutProperty("buildings-line", "visibility", bldgSym.visible ? "visible" : "none");
+    if (!bldgSym.visible) return;
+
+    // One ["==", ["get", level], cluster] test per paint row — rows can
+    // reference different level_N properties once the user has drilled into
+    // some clusters but not others.
+    const cases: any[] = [];
+    paintRows.forEach((r, i) => {
+      cases.push(["==", ["get", r.level], r.cluster], paintColors[i]);
+    });
+    map.setPaintProperty("buildings-fill", "fill-color", ["case", ...cases, "rgba(180,180,180,0.35)"]);
+    map.setPaintProperty("buildings-fill", "fill-opacity", bldgSym.opacity);
+  }, [bldgSym, paintRows, paintColors, mapReady]);
+  useEffect(() => { applyBldgSymbology(); }, [applyBldgSymbology]);
+
+  // ── Swap the buildings source to a different region's PMTiles ─────────
+  const loadRegionTiles = useCallback((map: maplibregl.Map, slug: string) => {
+    if (map.getLayer("buildings-fill")) map.removeLayer("buildings-fill");
+    if (map.getLayer("buildings-line")) map.removeLayer("buildings-line");
+    if (map.getSource(TAXONOMY_SOURCE)) map.removeSource(TAXONOMY_SOURCE);
+
+    map.addSource(TAXONOMY_SOURCE, { type: "vector", url: pmtilesUrl(slug) });
+    map.addLayer({ id: "buildings-fill", type: "fill",
+      source: TAXONOMY_SOURCE, "source-layer": "buildings",
+      paint: { "fill-color": "#888", "fill-opacity": 0.8 } });
+    map.addLayer({ id: "buildings-line", type: "line",
+      source: TAXONOMY_SOURCE, "source-layer": "buildings",
+      paint: { "line-color": "#333", "line-width": 0.4, "line-opacity": 0.5 } });
+  }, []);
+
+  // ── Region selection: swap tiles, fly to it, best-effort hierarchy fetch ──
+  const selectRegion = useCallback((slug: string | null) => {
+    if (!slug) return;
+    const region = regions.find(r => r.slug === slug);
+    if (!region) return;
+    setSelectedRegion(slug);
+
+    const map = mapRef.current;
+    if (map && mapReady) {
+      loadRegionTiles(map, slug);
+      applyBldgSymbology();
+      if (region.bbox) map.fitBounds(bboxToBounds(region.bbox), { padding: 40, duration: 1500 });
+      else map.flyTo({ center: region.center, zoom: 11, duration: 1500 });
+    }
+
+    setFeatureCounts({ buildings: region.nBuildings });
+    setFilterClusters(new Set());
+    setClickedProps(null);
+  }, [regions, loadRegionTiles, applyBldgSymbology, mapReady]);
+
+  // ── Init map (once) ─────────────────────────────────────
   useEffect(() => {
     if (!mapContainer.current) return;
     const map = new maplibregl.Map({
@@ -266,95 +330,59 @@ export default function App() {
         },
         layers: [{ id: "basemap", type: "raster", source: "basemap" }],
       },
-      center: [-97.15, 49.85], zoom: 11,
+      center: [-96, 62], zoom: 3,
     });
-    map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+    // top-right, not bottom-right: the Hierarchy Tree overlay now floats in
+    // the bottom-right corner and would otherwise sit on top of these.
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
     map.addControl(new maplibregl.ScaleControl(), "bottom-left");
     mapRef.current = map;
 
     const popup = new maplibregl.Popup({ closeButton: false, closeOnClick: false, maxWidth: "240px" });
     popupRef.current = popup;
 
-    map.on("load", async () => {
-      setLoading(true);
-      const [morphData, bldgData, hierResp] = await Promise.all([
-        loadFGB("/data/morphotopes.fgb"),
-        loadFGB("/data/buildings.fgb"),
-        fetch("/data/hierarchy_tree.json").then(r => r.json()),
-      ]);
-      morphDataRef.current = morphData;
-      bldgDataRef.current = bldgData;
-      setHierarchyData(hierResp);
-      setFeatureCounts({ morphotopes: morphData.features.length, buildings: bldgData.features.length });
-
-      const cents: Record<string, [number, number]> = {};
-      for (const f of morphData.features) {
-        const id = f.properties?.morph;
-        if (!id || !f.geometry) continue;
-        const coords: number[][] = [];
-        (function flat(c: any) {
-          if (typeof c[0] === "number") coords.push(c);
-          else c.forEach(flat);
-        })((f.geometry as any).coordinates);
-        if (coords.length === 0) continue;
-        cents[id] = [
-          coords.reduce((s, c) => s + c[0], 0) / coords.length,
-          coords.reduce((s, c) => s + c[1], 0) / coords.length,
-        ];
-      }
-      setCentroids(cents);
-
-      map.addSource("morphotopes", { type: "geojson", data: morphData });
-      map.addLayer({ id: "morphotopes-fill", type: "fill", source: "morphotopes",
-        paint: { "fill-color": "#888", "fill-opacity": 0.65 } });
-      map.addLayer({ id: "morphotopes-line", type: "line", source: "morphotopes",
-        paint: { "line-color": "#444", "line-opacity": 0.3,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.1, 14, 0.8] } });
-
-      map.addSource("buildings", { type: "geojson", data: bldgData });
-      map.addLayer({ id: "buildings-fill", type: "fill", source: "buildings",
-        paint: { "fill-color": "#888", "fill-opacity": 0.8 }, minzoom: 12 });
-      map.addLayer({ id: "buildings-line", type: "line", source: "buildings",
-        paint: { "line-color": "#333", "line-width": 0.4, "line-opacity": 0.5 }, minzoom: 12 });
-
-      setClusterIds(extractClusterIds([morphData, bldgData], "fc_level_3"));
-
-      map.on("mousemove", "morphotopes-fill", e => {
-        if (!e.features?.length) return;
-        map.getCanvas().style.cursor = "pointer";
-        const p = e.features[0].properties!;
-        const lvl = morphSymRef.current.colorBy;
-        const rows = [
-          `<div class="map-tooltip-row"><span class="tt-key">${lvl}</span><span class="tt-val">${p[lvl] ?? "—"}</span></div>`,
-          p.morph != null ? `<div class="map-tooltip-row"><span class="tt-key">Morphotope</span><span class="tt-val">${p.morph}</span></div>` : "",
-          p.building_count != null ? `<div class="map-tooltip-row"><span class="tt-key">Buildings</span><span class="tt-val">${p.building_count}</span></div>` : "",
-        ].filter(Boolean).join("");
-        popup.setLngLat(e.lngLat).setHTML(rows).addTo(map);
-      });
-      map.on("mouseleave", "morphotopes-fill", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
-
-      map.on("mousemove", "buildings-fill", e => {
-        if (!e.features?.length) return;
-        map.getCanvas().style.cursor = "pointer";
-        const p = e.features[0].properties!;
-        const rows = [
-          p.HEIGHT != null && p.HEIGHT > 0 ? `<div class="map-tooltip-row"><span class="tt-key">Height</span><span class="tt-val">${Number(p.HEIGHT).toFixed(1)}m</span></div>` : "",
-          p.BLDG_POP != null && p.BLDG_POP > 0 ? `<div class="map-tooltip-row"><span class="tt-key">Population</span><span class="tt-val">${p.BLDG_POP}</span></div>` : "",
-          p[morphSymRef.current.colorBy] != null ? `<div class="map-tooltip-row"><span class="tt-key">${morphSymRef.current.colorBy}</span><span class="tt-val">${p[morphSymRef.current.colorBy]}</span></div>` : "",
-        ].filter(Boolean).join("");
-        if (rows) popup.setLngLat(e.lngLat).setHTML(rows).addTo(map);
-      });
-      map.on("mouseleave", "buildings-fill", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
-
-      for (const layerId of ["morphotopes-fill", "buildings-fill"])
-        map.on("click", layerId, e => {
-          if (e.features?.[0]?.properties) setClickedProps(e.features[0].properties);
-        });
-
-      setLoading(false);
-    });
+    map.on("load", () => setMapReady(true));
     return () => { map.remove(); };
   }, []); // eslint-disable-line
+
+  // ── Once the map has loaded AND the region list has arrived: pick a
+  // default region, add its tiles, and wire up the buildings interactions
+  // (done once — layer ids stay stable across later region switches). ──
+  useEffect(() => {
+    if (!mapReady || regions.length === 0 || initializedRef.current) return;
+    initializedRef.current = true;
+    const map = mapRef.current!;
+    const popup = popupRef.current!;
+    const defaultRegion = regions.find(r => r.slug === "winnipeg") ?? regions[0];
+
+    setSelectedRegion(defaultRegion.slug);
+    loadRegionTiles(map, defaultRegion.slug);
+    setFeatureCounts({ buildings: defaultRegion.nBuildings });
+    if (defaultRegion.bbox) map.fitBounds(bboxToBounds(defaultRegion.bbox), { padding: 40, duration: 0 });
+    else map.jumpTo({ center: defaultRegion.center, zoom: 11 });
+
+    map.on("mousemove", "buildings-fill", e => {
+      if (!e.features?.length) return;
+      map.getCanvas().style.cursor = "pointer";
+      const p = e.features[0].properties!;
+      const sym = bldgSymRef.current;
+      const extra = p[sym.level] != null
+        ? `<div class="map-tooltip-row"><span class="tt-key">${sym.level}</span><span class="tt-val">${p[sym.level]}</span></div>` : "";
+      const rows = [
+        p.HEIGHT != null && p.HEIGHT > 0 ? `<div class="map-tooltip-row"><span class="tt-key">Height</span><span class="tt-val">${Number(p.HEIGHT).toFixed(1)}m</span></div>` : "",
+        p.BLDG_POP != null && p.BLDG_POP > 0 ? `<div class="map-tooltip-row"><span class="tt-key">Population</span><span class="tt-val">${p.BLDG_POP}</span></div>` : "",
+        extra,
+      ].filter(Boolean).join("");
+      if (rows) popup.setLngLat(e.lngLat).setHTML(rows).addTo(map);
+    });
+    map.on("mouseleave", "buildings-fill", () => { map.getCanvas().style.cursor = ""; popup.remove(); });
+    map.on("click", "buildings-fill", e => {
+      if (e.features?.[0]?.properties) setClickedProps(e.features[0].properties);
+    });
+
+    applyBldgSymbology();
+    setLoading(false);
+  }, [mapReady, regions, loadRegionTiles, applyBldgSymbology]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -362,90 +390,64 @@ export default function App() {
     (map.getSource("basemap") as maplibregl.RasterTileSource).setTiles([BASEMAPS[basemap].url]);
   }, [basemap]);
 
+  // Base level changed (e.g. "8 clusters" -> "16 clusters"): any drill-down
+  // done at the old level no longer means anything, start fresh.
   useEffect(() => {
-    if (!morphDataRef.current) return;
-    if (morphSym.colorBy.includes("level_")) {
-      const datasets: GeoJSON.FeatureCollection[] = [morphDataRef.current];
-      if (bldgDataRef.current) datasets.push(bldgDataRef.current);
-      setClusterIds(extractClusterIds(datasets, morphSym.colorBy));
-      setFilterClusters(new Set());
-    }
-  }, [morphSym.colorBy]);
-
-  const applyMorphSymbology = useCallback(() => {
-    const map = mapRef.current;
-    if (!map?.getLayer("morphotopes-fill")) return;
-    const colors = generateColors(clusterIds.length, morphSym.ramp as RampName);
-    map.setPaintProperty("morphotopes-fill", "fill-color", buildMatchExpression(morphSym.colorBy, clusterIds, colors));
-    map.setPaintProperty("morphotopes-fill", "fill-opacity", morphSym.opacity);
-    map.setLayoutProperty("morphotopes-fill", "visibility", morphSym.visible ? "visible" : "none");
-    map.setLayoutProperty("morphotopes-line", "visibility", morphSym.visible ? "visible" : "none");
-  }, [morphSym, clusterIds]);
-  useEffect(() => { applyMorphSymbology(); }, [applyMorphSymbology]);
+    if (!globalClusterSummary) return;
+    setClusterIds(clusterIdsForLevel(globalClusterSummary, bldgSym.level));
+    setExpandedClusters(new Set());
+    setFilterClusters(new Set());
+  }, [bldgSym.level, globalClusterSummary]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.getLayer("buildings-fill")) return;
-    map.setLayoutProperty("buildings-fill", "visibility", bldgSym.visible ? "visible" : "none");
-    map.setLayoutProperty("buildings-line", "visibility", bldgSym.visible ? "visible" : "none");
-    if (!bldgSym.visible) return;
-    const bColors = generateColors(clusterIds.length, bldgSym.ramp as RampName);
-    if (bldgSym.colorBy === "HEIGHT")
-      map.setPaintProperty("buildings-fill", "fill-color", buildInterpolateExpression("HEIGHT", 0, 30, bldgSym.ramp as RampName));
-    else if (bldgSym.colorBy === "BLDG_POP")
-      map.setPaintProperty("buildings-fill", "fill-color", buildInterpolateExpression("BLDG_POP", 0, 20, bldgSym.ramp as RampName));
-    else if (bldgSym.colorBy === "solid")
-      map.setPaintProperty("buildings-fill", "fill-color", bColors[0] || "#888");
-    else
-      map.setPaintProperty("buildings-fill", "fill-color", buildMatchExpression(bldgSym.colorBy, clusterIds, bColors, "rgba(180,180,180,0.15)"));
-    map.setPaintProperty("buildings-fill", "fill-opacity", bldgSym.opacity);
-  }, [bldgSym, clusterIds]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const lm: Record<string, string[]> = {
-      morphotopes: ["morphotopes-fill", "morphotopes-line"],
-      buildings: ["buildings-fill", "buildings-line"],
-    };
-    for (let i = layerOrder.length - 1; i >= 0; i--)
-      for (const id of lm[layerOrder[i]])
-        if (map.getLayer(id)) map.moveLayer(id);
-  }, [layerOrder]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map?.getLayer("morphotopes-fill")) return;
-    const filter = filterClusters.size > 0
-      ? ["in", ["get", morphSym.colorBy], ["literal", Array.from(filterClusters)]] as any : null;
-    map.setFilter("morphotopes-fill", filter);
-    map.setFilter("morphotopes-line", filter);
-    if (map.getLayer("buildings-fill")) {
-      const bProp = bldgSym.colorBy.includes("level_") ? bldgSym.colorBy : morphSym.colorBy;
-      const bf = filterClusters.size > 0
-        ? ["in", ["get", bProp], ["literal", Array.from(filterClusters)]] as any : null;
-      map.setFilter("buildings-fill", bf);
-      map.setFilter("buildings-line", bf);
+    if (filterClusters.size === 0) {
+      map.setFilter("buildings-fill", null);
+      map.setFilter("buildings-line", null);
+      return;
     }
-  }, [filterClusters, morphSym.colorBy, bldgSym.colorBy]);
+    const anyOf = Array.from(filterClusters).map(key => {
+      const { level, cluster } = parseClusterKey(key);
+      return ["==", ["get", level], cluster];
+    });
+    const filter = ["any", ...anyOf] as any;
+    map.setFilter("buildings-fill", filter);
+    map.setFilter("buildings-line", filter);
+  }, [filterClusters]);
 
   // Resize map when panels change
   useEffect(() => {
     mapRef.current?.resize();
-  }, [leftResize.width, rightResize.width, leftOpen, rightOpen]);
+  }, [leftResize.width, leftOpen, rightOpen]);
 
-  const clusterSummary = hierarchyData?.cluster_summary?.[morphSym.colorBy] || [];
-  const clusterSummaryMap = new Map(clusterSummary.map(s => [s.cluster, s.morphotopes]));
+  const currentLevel = bldgSym.level;
+  // Selection stats can span multiple levels once drilled — look counts up
+  // per (level, cluster) rather than assuming one shared level.
+  const countFor = (level: string, cluster: number): number =>
+    globalClusterSummary?.cluster_summary?.[level]?.find(s => s.cluster === cluster)?.morphotopes ?? 0;
 
-  const layerConfigs: Record<string, {
-    label: string; sym: LayerSymbology;
-    onChange: (s: LayerSymbology) => void; type: "morphotopes" | "buildings";
-  }> = {
-    morphotopes: { label: "Morphotopes", sym: morphSym, onChange: handleMorphSymChange, type: "morphotopes" },
-    buildings: { label: "Buildings (zoom 12+)", sym: bldgSym, onChange: handleBldgSymChange, type: "buildings" },
-  };
+  // The hierarchy tree only ever shows one fixed level, so its "active"
+  // highlighting only understands plain cluster ids at that level — pull
+  // just those out of the (possibly mixed-level) filter selection.
+  const treeActiveClusters = new Set(
+    Array.from(filterClusters)
+      .map(parseClusterKey)
+      .filter(({ level }) => level === currentLevel)
+      .map(({ cluster }) => cluster),
+  );
 
-  const currentLevel = morphSym.colorBy.includes("level_") ? morphSym.colorBy : "fc_level_3";
+  const regionGroups = Object.entries(
+    regions.reduce<Record<string, RegionConfig[]>>((acc, r) => {
+      (acc[r.province] ??= []).push(r);
+      return acc;
+    }, {})
+  )
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([province, items]) => ({
+      group: province,
+      items: items.map(r => ({ value: r.slug, label: r.name })),
+    }));
 
   return (
     <div className="app">
@@ -468,7 +470,7 @@ export default function App() {
           <ScrollArea h="calc(100vh - 32px)" offsetScrollbars scrollbarSize={6}>
             <Stack gap={6}>
               <Group justify="space-between">
-                <Text fw={700} size="md">Winnipeg Urban Taxonomy</Text>
+                <Text fw={700} size="md">Urban Taxonomy</Text>
                 <Group gap={4}>
                   <Tooltip label={rightOpen ? "Hide tree" : "Show tree"}>
                     <ActionIcon variant="subtle" size="sm" onClick={() => setRightOpen(v => !v)}>
@@ -486,15 +488,27 @@ export default function App() {
                 </Group>
               </Group>
 
+              <Select
+                size="xs"
+                leftSection={<IconMapPin size={13} />}
+                value={selectedRegion}
+                onChange={selectRegion}
+                allowDeselect={false}
+                searchable
+                nothingFoundMessage="No matching region"
+                placeholder={regionsError ? "Failed to load regions" : "Loading regions…"}
+                data={regionGroups}
+              />
+              {regionsError && (
+                <Text size="xs" c="red" fs="italic">{regionsError}</Text>
+              )}
+
               <div className="stats-bar">
-                <div className="stat-chip">
-                  <span className="stat-value">{featureCounts.morphotopes.toLocaleString()}</span> morphotopes
-                </div>
                 <div className="stat-chip">
                   <span className="stat-value">{featureCounts.buildings.toLocaleString()}</span> buildings
                 </div>
                 <div className="stat-chip">
-                  <span className="stat-value">{clusterIds.length}</span> clusters
+                  <span className="stat-value">{paintRows.length}</span> clusters
                 </div>
                 {filterClusters.size > 0 && (
                   <div className="stat-chip" style={{ color: "#e03131" }}>
@@ -508,69 +522,23 @@ export default function App() {
                 data={Object.entries(BASEMAPS).map(([k, v]) => ({ value: k, label: v.name }))}
                 value={basemap} onChange={setBasemap} />
 
-              <Divider label="Clustering Approach" labelPosition="left" />
-              <SegmentedControl size="xs" fullWidth
-                data={[
-                  { value: "fc", label: "Fixed Count" },
-                  { value: "pct", label: "Percentile" },
-                ]}
-                value={approach} onChange={handleApproachChange} />
-              <Text size="xs" c="dimmed">
-                {approach === "fc"
-                  ? "Ward linkage cut at fixed cluster counts (2→128)"
-                  : "Ward linkage cut at distance percentiles (fine→coarse)"}
-              </Text>
-
-              <Divider label="Layers" labelPosition="left" />
-              <Group justify="space-between" px={2}>
-                <Switch label="Sync levels & ramp" checked={syncLevels}
-                  onChange={e => setSyncLevels(e.currentTarget.checked)} size="xs"
-                  onLabel={<IconLink size={10} />} offLabel={<IconLinkOff size={10} />} />
+              <Divider label="Buildings" labelPosition="left" />
+              <Group justify="flex-end" px={2}>
+                <ActionIcon size="xs" variant="subtle"
+                  onClick={() => setBldgSym(s => ({ ...s, visible: !s.visible }))}>
+                  {bldgSym.visible ? <IconEye size={11} /> : <IconEyeOff size={11} />}
+                </ActionIcon>
               </Group>
 
-              <div className="layer-order-list">
-                {layerOrder.map((key, i) => (
-                  <Group key={key} className="layer-order-item" justify="space-between" wrap="nowrap">
-                    <Group gap={6} wrap="nowrap">
-                      <ActionIcon size="xs" variant="subtle"
-                        onClick={() => { const c = layerConfigs[key]; c.onChange({ ...c.sym, visible: !c.sym.visible }); }}>
-                        {layerConfigs[key].sym.visible ? <IconEye size={11} /> : <IconEyeOff size={11} />}
-                      </ActionIcon>
-                      <Text size="xs" fw={500} c={layerConfigs[key].sym.visible ? undefined : "dimmed"}>
-                        {layerConfigs[key].label}
-                      </Text>
-                    </Group>
-                    <Group gap={2} wrap="nowrap">
-                      <Tooltip label="Move up (on top)">
-                        <ActionIcon size="xs" variant="subtle" disabled={i === 0}
-                          onClick={() => moveLayer(key, -1)}><IconChevronUp size={11} /></ActionIcon>
-                      </Tooltip>
-                      <Tooltip label="Move down (below)">
-                        <ActionIcon size="xs" variant="subtle" disabled={i === layerOrder.length - 1}
-                          onClick={() => moveLayer(key, 1)}><IconChevronDown size={11} /></ActionIcon>
-                      </Tooltip>
-                    </Group>
-                  </Group>
-                ))}
-                <Text size="xs" c="dimmed" fs="italic" ta="right" mt={2}>
-                  Top of list = top of map
-                </Text>
-              </div>
-
-              <Accordion variant="separated" radius="sm" defaultValue={["morphotopes", "legend"]} multiple>
-                {layerOrder.map(key => {
-                  const cfg = layerConfigs[key];
-                  return (
-                    <Accordion.Item key={key} value={key}>
-                      <Accordion.Control><Text size="xs" fw={600}>{cfg.label}</Text></Accordion.Control>
-                      <Accordion.Panel>
-                        <LayerSymbologyPanel label={cfg.label} symbology={cfg.sym}
-                          onChange={cfg.onChange} layerType={cfg.type}
-                        levelOptions={levelOptions} />
-                      </Accordion.Panel>
-                    </Accordion.Item>
-                  );
-                })}
+              <Accordion variant="separated" radius="sm" defaultValue={["buildings", "legend"]} multiple>
+                <Accordion.Item value="buildings">
+                  <Accordion.Control><Text size="xs" fw={600}>Symbology</Text></Accordion.Control>
+                  <Accordion.Panel>
+                    <LayerSymbologyPanel label="Buildings" symbology={bldgSym}
+                      onChange={setBldgSym} layerType="buildings"
+                      levelOptions={levelOptions} />
+                  </Accordion.Panel>
+                </Accordion.Item>
 
                 <Accordion.Item value="legend">
                   <Accordion.Control><Text size="xs" fw={600}>Legend</Text></Accordion.Control>
@@ -582,44 +550,69 @@ export default function App() {
                       </Group>
                     )}
                     <div className="legend-grid">
-                      {clusterIds.map((id, i) => {
-                        const active = filterClusters.size === 0 || filterClusters.has(id);
-                        const count = clusterSummaryMap.get(id);
+                      {legendRows.map(row => {
+                        const active = filterClusters.size === 0 || filterClusters.has(row.key);
                         return (
-                          <div key={id} className={`legend-item ${active ? "" : "dimmed"}`}
-                            onClick={() => toggleClusterFilter(id)}
-                            onDoubleClick={() => zoomToCluster(id)}
-                            title={`Click: filter · Dbl-click: zoom${count != null ? ` · ${count} morphotopes` : ""}`}>
-                            <div className="legend-swatch" style={{ background: morphColors[i] }} />
-                            <span>{id}</span>
-                            {count != null && <span className="legend-count">({count})</span>}
+                          <div key={row.key} className={`legend-item ${active ? "" : "dimmed"}`}
+                            onClick={() => toggleClusterFilter(row.level, row.cluster)}
+                            onDoubleClick={() => zoomToCluster(row.level, row.cluster)}
+                            title={row.isExpanded
+                              ? `Click: filter · Dbl-click: zoom · − to collapse`
+                              : `Click: filter · Dbl-click: zoom · ${row.morphotopes} morphotopes${row.expandable ? " · + to subdivide" : ""}`}>
+                            <div className="legend-item-main" style={{ paddingLeft: row.depth * 14 }}>
+                              {row.isExpanded
+                                ? <div className="legend-swatch legend-swatch-group" />
+                                : <div className="legend-swatch" style={{ background: colorForKey.get(row.key) }} />}
+                              <span>{row.label}</span>
+                              <span className="legend-count">({row.morphotopes})</span>
+                            </div>
+                            <div className="legend-item-actions">
+                              {row.isExpanded ? (
+                                <ActionIcon size="xs" variant="subtle" title="Collapse"
+                                  onClick={e => { e.stopPropagation(); toggleExpand(row.key); }}>
+                                  <IconMinus size={9} />
+                                </ActionIcon>
+                              ) : row.expandable && (
+                                <ActionIcon size="xs" variant="subtle" title="Subdivide this cluster"
+                                  onClick={e => { e.stopPropagation(); toggleExpand(row.key); }}>
+                                  <IconPlus size={9} />
+                                </ActionIcon>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
+                      {legendRows.length === 0 && (
+                        <Text size="xs" c="dimmed" fs="italic">No cluster data available</Text>
+                      )}
                     </div>
                   </Accordion.Panel>
                 </Accordion.Item>
 
-                {filterClusters.size > 0 && clusterSummary.length > 0 && (
+                {filterClusters.size > 0 && (
                   <Accordion.Item value="cluster-stats">
                     <Accordion.Control><Text size="xs" fw={600}>Selection Stats</Text></Accordion.Control>
                     <Accordion.Panel>
                       <table className="cluster-stats-table">
                         <thead><tr><th>Cluster</th><th>Morphotopes</th><th>Color</th></tr></thead>
                         <tbody>
-                          {Array.from(filterClusters).sort((a, b) => a - b).map(id => {
-                            const count = clusterSummaryMap.get(id) ?? 0;
-                            const idx = clusterIds.indexOf(id);
-                            return (
-                              <tr key={id}>
-                                <td>{id}</td><td>{count}</td>
-                                <td><div style={{ width: 14, height: 14, borderRadius: 3, background: idx >= 0 ? morphColors[idx] : "#ccc" }} /></td>
-                              </tr>
-                            );
-                          })}
+                          {Array.from(filterClusters).map(parseClusterKey)
+                            .sort((a, b) => a.level === b.level ? a.cluster - b.cluster : a.level.localeCompare(b.level))
+                            .map(({ level, cluster }) => {
+                              const key = clusterKey(level, cluster);
+                              const count = countFor(level, cluster);
+                              const color = colorForKey.get(key);
+                              return (
+                                <tr key={key}>
+                                  <td>{level === bldgSym.level ? cluster : `${cluster} (L${level.replace("level_", "")})`}</td>
+                                  <td>{count}</td>
+                                  <td><div style={{ width: 14, height: 14, borderRadius: 3, background: color ?? "#ccc" }} /></td>
+                                </tr>
+                              );
+                            })}
                           <tr style={{ fontWeight: 700, borderTop: "1px solid rgba(128,128,128,0.3)" }}>
                             <td>Total</td>
-                            <td>{Array.from(filterClusters).reduce((s, id) => s + (clusterSummaryMap.get(id) ?? 0), 0)}</td>
+                            <td>{Array.from(filterClusters).map(parseClusterKey).reduce((s, { level, cluster }) => s + countFor(level, cluster), 0)}</td>
                             <td />
                           </tr>
                         </tbody>
@@ -630,13 +623,15 @@ export default function App() {
 
                 {clickedProps && (
                   <Accordion.Item value="properties">
-                    <Accordion.Control>
-                      <Group gap={4}>
-                        <Text size="xs" fw={600}>Properties</Text>
-                        <ActionIcon size="xs" variant="subtle"
-                          onClick={e => { e.stopPropagation(); setClickedProps(null); }}><IconX size={10} /></ActionIcon>
-                      </Group>
-                    </Accordion.Control>
+                    {/* ActionIcon renders a <button>, so it can't live inside
+                        Accordion.Control (also a <button>) without invalid
+                        nested-button HTML — Mantine's own pattern for this is
+                        a sibling row instead. */}
+                    <Group gap={0} wrap="nowrap">
+                      <Accordion.Control style={{ flex: 1 }}><Text size="xs" fw={600}>Properties</Text></Accordion.Control>
+                      <ActionIcon size="xs" variant="subtle" mr="xs"
+                        onClick={() => setClickedProps(null)}><IconX size={10} /></ActionIcon>
+                    </Group>
                     <Accordion.Panel>
                       <Table striped highlightOnHover withTableBorder>
                         <Table.Tbody>
@@ -661,50 +656,31 @@ export default function App() {
           onMouseDown={leftResize.onMouseDown} />
       </div>
 
-      {/* ── Right panel toggle tab ────────────────────────── */}
-      <Paper
-        className={`panel-tab panel-tab-right ${rightOpen ? "hidden" : ""}`}
-        shadow="md" radius="sm" p={0} withBorder
-        onClick={() => setRightOpen(true)}
-      >
-        <IconChevronLeft size={18} />
-      </Paper>
-
-      {/* ── Right Panel: Hierarchy ─────────────────────── */}
+      {/* ── Hierarchy Tree: small floating overlay, bottom-right of the
+          map (not a docked sidebar) — shown/hidden via the tree icon in
+          the left panel's header, no chrome of its own. ── */}
       <div ref={rightRef} className="right-panel-wrapper"
-        style={{ width: rightResize.width }}
+        style={{ width: treeMode === "vertical" ? 520 : 320 }}
       >
-        {/* resize handle */}
-        <div className="resize-handle resize-handle-left"
-          onMouseDown={rightResize.onMouseDown} />
-
-        <Paper className="right-panel" shadow="lg" radius="md" p="xs" withBorder>
-          <Group justify="space-between" mb={4}>
-            <Text fw={600} size="sm">Hierarchy Tree</Text>
-            <Tooltip label="Collapse panel">
-              <ActionIcon variant="subtle" size="sm" onClick={() => setRightOpen(false)}>
-                <IconChevronRight size={14} />
-              </ActionIcon>
-            </Tooltip>
-          </Group>
+        <div className={`right-panel ${treeMode === "radial" ? "right-panel-circle" : "right-panel-box"}`}>
           <HierarchyView
-            trees={hierarchyData?.trees || null}
-            fullTree={hierarchyData?.tree || null}
+            fullTree={taxonomyTree}
             level={currentLevel}
-            ramp={morphSym.ramp as RampName}
+            ramp={bldgSym.ramp as RampName}
             clusterIds={clusterIds}
-            activeClusters={filterClusters}
-            centroids={centroids}
-            onClusterClick={toggleClusterFilter}
+            activeClusters={treeActiveClusters}
+            mode={treeMode}
+            onModeChange={setTreeMode}
+            onClusterClick={(id) => toggleClusterFilter(currentLevel, id)}
             onBranchClick={handleBranchClick}
-            onClusterDoubleClick={zoomToCluster}
+            onClusterDoubleClick={(id) => zoomToCluster(currentLevel, id)}
           />
-        </Paper>
+        </div>
       </div>
 
       {loading && (
         <div className="loading-overlay">
-          <Text size="lg" fw={600} c="white">Loading morphotopes & buildings…</Text>
+          <Text size="lg" fw={600} c="white">Loading taxonomy…</Text>
         </div>
       )}
     </div>

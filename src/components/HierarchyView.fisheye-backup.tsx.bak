@@ -1,0 +1,435 @@
+// BACKUP — not compiled/built (kept as .tsx.bak so TS/Vite ignore it).
+// This is HierarchyView.tsx as it stood WITH the GSAP fisheye hover feature
+// (magnify + distort nodes/links near the cursor), before it was removed in
+// favor of a plain static circular/vertical dendrogram. Restore by copying
+// this content back into HierarchyView.tsx (drop the .bak extension) if the
+// fisheye interaction is wanted again later.
+
+import { useEffect, useRef, useState } from "react";
+import { Paper, ActionIcon, Tooltip } from "@mantine/core";
+import { IconCircle, IconSitemap } from "@tabler/icons-react";
+import * as d3 from "d3";
+import gsap from "gsap";
+import type { TreeNode } from "../utils/types";
+import { generateColors } from "../utils/colors";
+import type { RampName } from "../utils/colors";
+
+interface Props {
+  fullTree: TreeNode | null;
+  level: string;
+  ramp: RampName;
+  clusterIds: number[];
+  activeClusters: Set<number>;
+  centroids: Record<string, [number, number]>;
+  onClusterClick: (id: number) => void;
+  onBranchClick?: (ids: number[]) => void;
+  onClusterDoubleClick?: (id: number) => void;
+}
+
+function fisheyePoint(
+  px: number, py: number, fx: number, fy: number,
+  radius: number, distortion: number,
+): [number, number] {
+  const dx = px - fx, dy = py - fy;
+  const dd = Math.sqrt(dx * dx + dy * dy);
+  if (dd === 0 || dd >= radius) return [px, py];
+  const norm = dd / radius;
+  const warp = norm * (distortion + 1) / (norm * distortion + 1);
+  const scale = warp / norm;
+  return [fx + dx * scale, fy + dy * scale];
+}
+
+// Depth-to-radius/y easing: d3.cluster() normally spaces levels linearly
+// (equal ring/row spacing per level). Reference dendrograms (e.g. the
+// arcpy circular one this mirrors) instead give early splits near the
+// root much more room and compress the fine branching near the leaves.
+// Applying this power-ease to the normalized [0,1] depth position
+// reproduces that look for any tree shape, radial or vertical, without
+// needing a fixed per-level radius table.
+const LEVEL_SPACING_GAMMA = 2.2;
+function easeOutPow(t: number, gamma: number): number {
+  return 1 - Math.pow(1 - t, gamma);
+}
+
+// Shortest-path angular interpolation a -> b (handles the 0/2π wrap).
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = (b - a) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return a + d * t;
+}
+
+type LayoutMode = "radial" | "vertical" | "geographic";
+
+// Fixed now that the panel is a small floating corner overlay rather than a
+// resizable full-height sidebar — a user-adjustable radius/distortion pair
+// doesn't earn its keep at this size, so these replace what used to be two
+// sliders.
+const FISH_RADIUS = 70;
+const FISH_DISTORTION = 1.5;
+
+export default function HierarchyView({
+  fullTree, level, ramp, clusterIds, activeClusters, centroids,
+  onClusterClick, onBranchClick, onClusterDoubleClick,
+}: Props) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Circular fits this small square overlay far better than vertical (which
+  // needs real height to spread 128 leaves legibly) — vertical is still one
+  // click away.
+  const [mode, setMode] = useState<LayoutMode>("radial");
+  const [containerSize, setContainerSize] = useState({ w: 300, h: 300 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let timeout: number;
+    const obs = new ResizeObserver(entries => {
+      clearTimeout(timeout);
+      timeout = window.setTimeout(() => {
+        const { width, height } = entries[0].contentRect;
+        if (width > 0 && height > 0)
+          setContainerSize({ w: Math.round(width), h: Math.round(height) });
+      }, 120);
+    });
+    obs.observe(el);
+    return () => { obs.disconnect(); clearTimeout(timeout); };
+  }, []);
+
+  useEffect(() => {
+    if (!svgRef.current) return;
+    const svg = d3.select(svgRef.current);
+    // Always clear first: switching to a region with no tree data yet
+    // (fullTree null) must blank the panel, not leave the previous
+    // region's tree rendered on screen.
+    svg.selectAll("*").remove();
+    if (!fullTree) return;
+
+    const width = containerSize.w;
+    const height = containerSize.h;
+    if (width < 50 || height < 50) return;
+
+    const colors = generateColors(clusterIds.length, ramp);
+    const cx = width / 2, cy = height / 2;
+    const mg = { top: 16, right: 16, bottom: 16, left: 16 };
+    const isGeo = mode === "geographic";
+
+    function getLeafCluster(node: any): number {
+      // Every node (not just leaves) carries every ancestor level's cluster
+      // id — see buildTaxonomyTree — so this is a direct lookup, not a walk.
+      return node.data?.[level] ?? -1;
+    }
+    function getNodeColor(node: any): string {
+      const idx = clusterIds.indexOf(getLeafCluster(node));
+      return idx >= 0 ? colors[idx] : "#ccc";
+    }
+    function getSubtreeClusters(node: d3.HierarchyNode<any>): number[] {
+      const ids = new Set<number>();
+      for (const leaf of node.leaves()) {
+        const cid = (leaf.data as any)?.[level] ?? -1;
+        if (cid >= 0) ids.add(cid);
+      }
+      return Array.from(ids);
+    }
+
+    const root = d3.hierarchy(fullTree, (d: any) => d.children);
+    svg.attr("viewBox", `0 0 ${width} ${height}`);
+    const r = Math.min(width, height) / 2 - 20;
+    // Radial mode only: keep a small open hub at the center instead of
+    // letting depth 0 collapse to radius 0. Without it, every link whose
+    // parent is the root (or near it) has its curve's control point land
+    // exactly on the center point too, so sibling branches meet as a sharp
+    // vertex there instead of a smooth curve.
+    const MIN_R = 26;
+    const radialR = (t: number) => MIN_R + easeOutPow(t, LEVEL_SPACING_GAMMA) * (r - MIN_R);
+
+    // ── Layout ───────────────────────────────────────────
+    // Both cluster() calls use a normalized [0,1] extent for the
+    // depth axis (radius / vertical y) — the non-linear easing below maps
+    // that [0,1] position to physical pixels instead of d3's linear default.
+    if (mode === "radial") {
+      d3.cluster<TreeNode>().size([2 * Math.PI, 1]).separation(() => 1)(root as any);
+    } else if (mode === "vertical") {
+      d3.cluster<TreeNode>()
+        .size([width - mg.left - mg.right, 1])(root as any);
+    }
+    // geographic: positions set below from centroids
+
+    // ── Assign Cartesian positions ───────────────────────
+    if (isGeo) {
+      // Compute geographic bounds from centroids of leaves in this tree
+      let lngMin = Infinity, lngMax = -Infinity, latMin = Infinity, latMax = -Infinity;
+      let found = 0;
+      root.leaves().forEach((d: any) => {
+        const c = centroids[String(d.data.id)];
+        if (c) {
+          lngMin = Math.min(lngMin, c[0]); lngMax = Math.max(lngMax, c[0]);
+          latMin = Math.min(latMin, c[1]); latMax = Math.max(latMax, c[1]);
+          found++;
+        }
+      });
+
+      if (found < 2) {
+        // Fallback: not enough centroids, use vertical layout
+        d3.cluster<TreeNode>().size([width - mg.left - mg.right, 1])(root as any);
+        root.each((d: any) => {
+          d._ox = d.x + mg.left;
+          d._oy = mg.top + easeOutPow(d.y, LEVEL_SPACING_GAMMA) * (height - mg.top - mg.bottom);
+        });
+      } else {
+        const pad = 35;
+        const aspect = (lngMax - lngMin) / (latMax - latMin);
+        const panelAspect = (width - 2 * pad) / (height - 2 * pad);
+        let scaleW = width - 2 * pad, scaleH = height - 2 * pad;
+        let offX = pad, offY = pad;
+        if (aspect > panelAspect) {
+          scaleH = scaleW / aspect;
+          offY = (height - scaleH) / 2;
+        } else {
+          scaleW = scaleH * aspect;
+          offX = (width - scaleW) / 2;
+        }
+        const sx = (lng: number) => offX + ((lng - lngMin) / (lngMax - lngMin)) * scaleW;
+        const sy = (lat: number) => offY + ((latMax - lat) / (latMax - latMin)) * scaleH;
+
+        // Leaves: place at centroid
+        root.leaves().forEach((d: any) => {
+          const c = centroids[String(d.data.id)];
+          if (c) {
+            d._ox = sx(c[0]); d._oy = sy(c[1]);
+          }
+        });
+
+        // Branch nodes: weighted average of children (bottom-up)
+        root.eachAfter((d: any) => {
+          if (d.children && d.children.length > 0) {
+            let sumX = 0, sumY = 0, n = 0;
+            for (const child of d.children) {
+              if (child._ox != null) { sumX += child._ox; sumY += child._oy; n++; }
+            }
+            if (n > 0) { d._ox = sumX / n; d._oy = sumY / n; }
+            else { d._ox = cx; d._oy = cy; }
+          }
+          // Leaves without centroids: place near parent later
+          if (!d.children && d._ox == null) {
+            d._ox = cx; d._oy = cy;
+          }
+        });
+      }
+    } else {
+      root.each((d: any) => {
+        if (mode === "radial") {
+          const rad = radialR(d.y);
+          const [px, py] = d3.pointRadial(d.x, rad) as [number, number];
+          d._ox = cx + px; d._oy = cy + py;
+        } else {
+          d._ox = d.x + mg.left;
+          d._oy = mg.top + easeOutPow(d.y, LEVEL_SPACING_GAMMA) * (height - mg.top - mg.bottom);
+        }
+      });
+    }
+
+    // ── Active status ────────────────────────────────────
+    root.eachAfter((d: any) => {
+      if (!d.children)
+        d._active = activeClusters.size === 0 || activeClusters.has(d.data?.[level] ?? -1);
+      else
+        d._active = d.children.some((c: any) => c._active);
+    });
+
+    const allNodes = root.descendants();
+    const allLinks = root.links();
+
+    // ── Link bend points ─────────────────────────────────
+    allLinks.forEach((link: any) => {
+      const t = link.target as any, s = link.source as any;
+      if (isGeo) {
+        // Smooth curve: control point at parent x, child y
+        link._bx = s._ox;
+        link._by = t._oy;
+      } else if (mode === "radial") {
+        const sRad = radialR(s.y);
+        // Pure target-angle control points make the curve point almost
+        // straight at the center near the root (barely any radius to sweep
+        // an arc through), so siblings meet there as a sharp vertex instead
+        // of a smooth merge. Blending the control angle partway toward the
+        // parent's rounds that off at every depth without materially
+        // changing the wider "hood" shape further out.
+        const bendAngle = lerpAngle(t.x, s.x, 0.35);
+        const [bx, by] = d3.pointRadial(bendAngle, sRad) as [number, number];
+        link._bx = cx + bx; link._by = cy + by;
+      } else {
+        link._bx = t._ox; link._by = s._oy;
+      }
+    });
+
+    // ── Draw ─────────────────────────────────────────────
+    const g = svg.append("g");
+
+    // One curve formula for every mode and every state (at rest AND mid
+    // fisheye-distortion): a quadratic bezier through target -> bend point
+    // (as the curve's control point, not a literal waypoint) -> source.
+    // Earlier this used a true SVG arc for the radial mode's circumferential
+    // hop, which looked great at rest but only stays mathematically valid
+    // when target/bend/source sit on a shared circle — fisheye-warped points
+    // don't, so hovering had to fall back to straight lines, then switch
+    // back on mouseleave. A quadratic bezier doesn't need that constraint:
+    // it looks smooth for any three points, so the same call draws the
+    // resting curve and every distorted frame with zero visual style change.
+    function linkPathD(tx: number, ty: number, bx: number, by: number, sx: number, sy: number): string {
+      return `M${tx},${ty}Q${bx},${by} ${sx},${sy}`;
+    }
+
+    const linkEls: SVGPathElement[] = [];
+    g.selectAll(".link").data(allLinks).join("path")
+      .attr("class", "link").attr("fill", "none")
+      .attr("stroke", (d: any) => getNodeColor(d.target))
+      .attr("stroke-width", isGeo ? 0.5 : 2)
+      .attr("stroke-opacity", (d: any) =>
+        (d.target as any)._active ? (isGeo ? 0.5 : 0.7) : 0.04)
+      .attr("d", (d: any) => {
+        const t = d.target as any, s = d.source as any;
+        return linkPathD(t._ox, t._oy, d._bx, d._by, s._ox, s._oy);
+      })
+      .each(function () { linkEls.push(this as SVGPathElement); });
+
+    // Shared with the fisheye render() loop below so hovering doesn't snap
+    // nodes to a different resting size than their static ones.
+    const branchR = isGeo ? 1.1 : 1.1;
+    const leafR = isGeo ? 1.3 : 1.4;
+
+    const nodeEls: SVGCircleElement[] = [];
+    g.selectAll(".node").data(allNodes).join("circle")
+      .attr("class", "node")
+      .attr("cx", (d: any) => d._ox).attr("cy", (d: any) => d._oy)
+      .attr("r", (d: any) => d.children ? branchR : leafR)
+      .attr("fill", (d: any) => getNodeColor(d))
+      .attr("stroke", "none")
+      .attr("opacity", (d: any) => {
+        if (!d._active) return 0.04;
+        return d.children ? (isGeo ? 0.25 : 0.45) : 0.95;
+      })
+      .style("cursor", "pointer")
+      .on("click", (_e: any, d: any) => {
+        if (d.children) onBranchClick?.(getSubtreeClusters(d));
+        else onClusterClick(getLeafCluster(d));
+      })
+      .on("dblclick", (_e: any, d: any) => {
+        if (!d.children) onClusterDoubleClick?.(getLeafCluster(d));
+      })
+      .each(function () { nodeEls.push(this as SVGCircleElement); });
+
+    const labelEls: SVGTextElement[] = [];
+    g.selectAll(".node-label").data(allNodes).join("text")
+      .attr("class", "node-label")
+      .attr("x", (d: any) => d._ox)
+      .attr("y", (d: any) => d._oy - (d.children ? 3 : 4) - 2)
+      .attr("text-anchor", "middle")
+      .attr("font-size", isGeo ? 2.5 : 3.5)
+      .attr("fill", (d: any) => d._active ? "#555" : "transparent")
+      .attr("pointer-events", "none")
+      .text((d: any) => d.children ? `[${d.leaves().length}]` : getLeafCluster(d))
+      .style("opacity", "0")
+      .each(function () { labelEls.push(this as SVGTextElement); });
+
+    const radiusRing = g.append("circle")
+      .attr("fill", "none").attr("stroke", "rgba(100,100,100,0.15)")
+      .attr("stroke-width", 1).attr("stroke-dasharray", "4,3")
+      .style("pointer-events", "none").style("opacity", "0");
+
+    // ── GSAP fisheye ─────────────────────────────────────
+    const lens = { fx: cx, fy: cy, blend: 0 };
+
+    function render() {
+      const { fx, fy, blend } = lens;
+      radiusRing.attr("cx", fx).attr("cy", fy).attr("r", FISH_RADIUS)
+        .style("opacity", String(blend * 0.4));
+
+      for (let i = 0; i < allNodes.length; i++) {
+        const d = allNodes[i] as any;
+        const isLeaf = !d.children;
+        const baseR = isLeaf ? leafR : branchR;
+        const maxGrow = isLeaf ? 5 : 3.5;
+
+        const [nx, ny] = fisheyePoint(d._ox, d._oy, fx, fy, FISH_RADIUS, FISH_DISTORTION);
+        const x = d._ox + (nx - d._ox) * blend;
+        const y = d._oy + (ny - d._oy) * blend;
+        const dist = Math.sqrt((d._ox - fx) ** 2 + (d._oy - fy) ** 2);
+        const near = dist < FISH_RADIUS ? 1 - dist / FISH_RADIUS : 0;
+        const r = baseR + near * maxGrow * blend;
+
+        nodeEls[i].setAttribute("cx", String(x));
+        nodeEls[i].setAttribute("cy", String(y));
+        nodeEls[i].setAttribute("r", String(r));
+
+        if (!isLeaf && d._active)
+          nodeEls[i].setAttribute("opacity", String((isGeo ? 0.25 : 0.45) + near * 0.55 * blend));
+
+        const el = labelEls[i];
+        if (el) {
+          el.setAttribute("x", String(x));
+          el.setAttribute("y", String(y - r - 2));
+          const fs = (isGeo ? 2.5 : 3.5) + near * 7 * blend;
+          el.setAttribute("font-size", String(fs));
+          const threshold = isLeaf ? 0.25 : 0.4;
+          el.style.opacity = near > threshold && blend > 0.3 ? String(Math.min(1, near * 2.5 * blend)) : "0";
+        }
+      }
+
+      for (let i = 0; i < allLinks.length; i++) {
+        const link = allLinks[i] as any;
+        const t = link.target as any, s = link.source as any;
+        const [ntx, nty] = fisheyePoint(t._ox, t._oy, fx, fy, FISH_RADIUS, FISH_DISTORTION);
+        const [nsx, nsy] = fisheyePoint(s._ox, s._oy, fx, fy, FISH_RADIUS, FISH_DISTORTION);
+        const [nbx, nby] = fisheyePoint(link._bx, link._by, fx, fy, FISH_RADIUS, FISH_DISTORTION);
+        const tx = t._ox + (ntx - t._ox) * blend, ty = t._oy + (nty - t._oy) * blend;
+        const sx = s._ox + (nsx - s._ox) * blend, sy = s._oy + (nsy - s._oy) * blend;
+        const bx = link._bx + (nbx - link._bx) * blend, by = link._by + (nby - link._by) * blend;
+        linkEls[i]?.setAttribute("d", linkPathD(tx, ty, bx, by, sx, sy));
+      }
+    }
+
+    svg.on("mousemove.fisheye", function (event: MouseEvent) {
+      const [mx, my] = d3.pointer(event, this);
+      gsap.to(lens, { fx: mx, fy: my, blend: 1, duration: 0.2,
+        ease: "power2.out", overwrite: true, onUpdate: render });
+    });
+    svg.on("mouseleave.fisheye", () => {
+      // At blend 0 this converges on exactly the same tx/ty/bx/by/sx/sy —
+      // and therefore the same path string — as the static render above, so
+      // there's nothing extra to restore: same formula in, same curve out.
+      gsap.to(lens, { blend: 0, duration: 0.5,
+        ease: "power3.out", overwrite: true, onUpdate: render });
+    });
+
+    return () => {
+      gsap.killTweensOf(lens);
+      svg.on("mousemove.fisheye", null);
+      svg.on("mouseleave.fisheye", null);
+    };
+  }, [fullTree, mode, level, ramp, clusterIds, activeClusters, centroids,
+      onClusterClick, onBranchClick, onClusterDoubleClick, containerSize]);
+
+  return (
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <Paper shadow="sm" radius="md" p={2} withBorder
+        style={{ position: "absolute", top: 6, right: 6, zIndex: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+        <Tooltip label="Circular" position="left" withArrow>
+          <ActionIcon size="sm" variant={mode === "radial" ? "filled" : "subtle"}
+            onClick={() => setMode("radial")}>
+            <IconCircle size={14} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Vertical" position="left" withArrow>
+          <ActionIcon size="sm" variant={mode === "vertical" ? "filled" : "subtle"}
+            onClick={() => setMode("vertical")}>
+            <IconSitemap size={14} />
+          </ActionIcon>
+        </Tooltip>
+      </Paper>
+      <div ref={containerRef} style={{ width: "100%", height: "100%", overflow: "hidden" }}>
+        <svg ref={svgRef} width="100%" height="100%" style={{ display: "block" }} />
+      </div>
+    </div>
+  );
+}

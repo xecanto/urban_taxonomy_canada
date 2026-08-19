@@ -31,9 +31,9 @@ export function generateColors(n: number, rampName: RampName): string[] {
     return Array.from({ length: n }, (_, i) => base[i % base.length]);
   }
   try {
-    return chroma.scale(rampName.toLowerCase()).mode("lch").colors(n);
+    return chroma.scale(rampName.toLowerCase() as any).mode("lch").colors(n);
   } catch {
-    return chroma.scale("spectral").mode("lch").colors(n);
+    return chroma.scale("Spectral" as any).mode("lch").colors(n);
   }
 }
 
@@ -45,36 +45,4 @@ export function getColor(
   const idx = clusterIds.indexOf(id);
   if (idx < 0) return "#888";
   return colors[idx % colors.length];
-}
-
-export function buildMatchExpression(
-  property: string,
-  clusterIds: number[],
-  colors: string[],
-  fallback = "#888"
-): any {
-  if (clusterIds.length === 0) return fallback;
-  const stops: (string | number)[] = [];
-  clusterIds.forEach((id, i) => {
-    stops.push(id, colors[i % colors.length]);
-  });
-  return ["match", ["get", property], ...stops, fallback];
-}
-
-export function buildInterpolateExpression(
-  property: string,
-  min: number,
-  max: number,
-  rampName: RampName
-): any {
-  const colors = generateColors(5, rampName);
-  const step = (max - min) / 4;
-  return [
-    "interpolate", ["linear"], ["get", property],
-    min, colors[0],
-    min + step, colors[1],
-    min + step * 2, colors[2],
-    min + step * 3, colors[3],
-    max, colors[4],
-  ];
 }

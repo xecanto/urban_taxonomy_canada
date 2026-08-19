@@ -99,10 +99,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [globalClusterSummary, setGlobalClusterSummary] = useState<GlobalClusterSummary | null>(null);
   // The no-CHM run is its own separate clustering pass — genuinely different
-  // taxonomy structure. Only the Hierarchy Tree uses this (see taxonomyTree
-  // below); the legend/map-coloring stay on globalClusterSummary (the CHM
-  // one) always, by design, so a color keeps meaning the same cluster id
-  // regardless of which dataset's buildings are shown.
+  // cluster counts/structure than the CHM one. See activeClusterSummary
+  // below for which of the two is actually used where.
   const [nochmClusterSummary, setNochmClusterSummary] = useState<GlobalClusterSummary | null>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
@@ -133,12 +131,21 @@ export default function App() {
 
   bldgSymRef.current = bldgSym;
 
+  // CHM and no-CHM are separate clustering passes over different building
+  // sets, so their real counts per cluster differ — the legend/map/tree all
+  // read from whichever one matches the buildings currently on screen.
+  // Colors stay consistent across both anyway: every list here is sorted by
+  // cluster id, and colorForKey below assigns colors by position in that
+  // sorted order, so id 5 lands on the same color regardless of which
+  // dataset's (different) counts are showing next to it.
+  const activeClusterSummary = tileVariant === "tiles_nochm" ? nochmClusterSummary : globalClusterSummary;
+
   // The legend, as an outline: every cluster at bldgSym.level, plus (for any
   // the user has drilled into) their children nested underneath as further
-  // rows — see buildLegendRows. Region-independent.
+  // rows — see buildLegendRows.
   const legendRows = useMemo(
-    () => buildLegendRows(bldgSym.level, expandedClusters, globalClusterSummary),
-    [bldgSym.level, expandedClusters, globalClusterSummary],
+    () => buildLegendRows(bldgSym.level, expandedClusters, activeClusterSummary),
+    [bldgSym.level, expandedClusters, activeClusterSummary],
   );
   // Only non-expanded rows are actual map paint categories — an expanded
   // (group header) row's buildings are now split across its own children.
@@ -146,14 +153,7 @@ export default function App() {
   const paintColors = generateColors(paintRows.length, bldgSym.ramp as RampName);
   const colorForKey = new Map(paintRows.map((r, i) => [r.key, paintColors[i]]));
 
-  // The Hierarchy Tree panel's data — built from the global summary matching
-  // whichever dataset's buildings are currently shown (CHM vs no-CHM are
-  // separate clustering passes with genuinely different structure), so it's
-  // always available for every region regardless, unlike the old per-region
-  // dendrogram asset. Node/link colors still come from the CHM cluster ids
-  // (clusterIds/ramp, unchanged) so a given color keeps meaning the same
-  // cluster id in the tree no matter which dataset it's currently drawing.
-  const activeClusterSummary = tileVariant === "tiles_nochm" ? nochmClusterSummary : globalClusterSummary;
+  // The Hierarchy Tree panel's data, from that same active summary.
   const taxonomyTree = useMemo(
     () => (activeClusterSummary ? buildTaxonomyTree(activeClusterSummary) : null),
     [activeClusterSummary],
@@ -358,8 +358,10 @@ export default function App() {
     setClickedProps(null);
   }, [regions, loadRegionTiles, applyBldgSymbology, mapReady, tileVariant]);
 
-  // ── CHM / no-CHM toggle: same region, same view, same legend/filter —
-  // just swap which pipeline run's building tiles are drawn. ──
+  // ── CHM / no-CHM toggle: same region, same view — swap which pipeline
+  // run's building tiles are drawn. Legend/tree/filter/drill-down all follow
+  // automatically via activeClusterSummary (see above) once tileVariant
+  // changes, so this only needs to touch the map layer itself. ──
   const toggleNoChm = useCallback((useNoChm: boolean) => {
     const variant: TileVariant = useNoChm ? "tiles_nochm" : "tiles";
     setTileVariant(variant);
@@ -367,9 +369,8 @@ export default function App() {
     if (map && mapReady && selectedRegion) {
       loadRegionTiles(map, selectedRegion, variant);
       applyBldgSymbology();
-      applyMapFilter();
     }
-  }, [mapReady, selectedRegion, loadRegionTiles, applyBldgSymbology, applyMapFilter]);
+  }, [mapReady, selectedRegion, loadRegionTiles, applyBldgSymbology]);
 
   // ── Init map (once) ─────────────────────────────────────
   useEffect(() => {
@@ -446,14 +447,16 @@ export default function App() {
     (map.getSource("basemap") as maplibregl.RasterTileSource).setTiles([BASEMAPS[basemap].url]);
   }, [basemap]);
 
-  // Base level changed (e.g. "8 clusters" -> "16 clusters"): any drill-down
-  // done at the old level no longer means anything, start fresh.
+  // Base level changed (e.g. "8 clusters" -> "16 clusters") OR the CHM/
+  // no-CHM dataset was swapped (activeClusterSummary is then a different
+  // object — its own children_map, so any drill-down done under the old one
+  // no longer means anything): start fresh either way.
   useEffect(() => {
-    if (!globalClusterSummary) return;
-    setClusterIds(clusterIdsForLevel(globalClusterSummary, bldgSym.level));
+    if (!activeClusterSummary) return;
+    setClusterIds(clusterIdsForLevel(activeClusterSummary, bldgSym.level));
     setExpandedClusters(new Set());
     setFilterClusters(new Set());
-  }, [bldgSym.level, globalClusterSummary]);
+  }, [bldgSym.level, activeClusterSummary]);
 
   useEffect(() => { applyMapFilter(); }, [applyMapFilter]);
 
@@ -466,7 +469,7 @@ export default function App() {
   // Selection stats can span multiple levels once drilled — look counts up
   // per (level, cluster) rather than assuming one shared level.
   const countFor = (level: string, cluster: number): number =>
-    globalClusterSummary?.cluster_summary?.[level]?.find(s => s.cluster === cluster)?.morphotopes ?? 0;
+    activeClusterSummary?.cluster_summary?.[level]?.find(s => s.cluster === cluster)?.morphotopes ?? 0;
 
   // The hierarchy tree only ever shows one fixed level, so its "active"
   // highlighting only understands plain cluster ids at that level — pull
@@ -565,7 +568,7 @@ export default function App() {
 
               <Divider label="Buildings" labelPosition="left" />
               <Group justify="space-between" px={2}>
-                <Tooltip label="Same regions, taxonomy, and legend — just without CHM (canopy height) building attributes" withArrow>
+                <Tooltip label="A separate clustering run without CHM (canopy height) attributes — same colors per cluster id, but counts/tree reflect this run's own taxonomy" withArrow>
                   <Checkbox
                     size="xs" label="No CHM"
                     checked={tileVariant === "tiles_nochm"}

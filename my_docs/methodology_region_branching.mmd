@@ -1,0 +1,42 @@
+%% Urban Form Taxonomy — Single-Region Methodology (real branch points)
+%% Buildings pipeline: notebooks_buidings/01..11 (one boundary, run start-to-finish)
+%% Unlike the linear/staged versions, this shows the pipeline's actual control
+%% flow: a retry loop in tessellation, and a noise/non-noise split that only
+%% rejoins at the very end.
+
+flowchart TD
+    IN[("Building footprints (OBPL-CA)<br/>Road network (OSM)<br/>Region boundary")]
+    P1["1. Preprocess<br/>clip to boundary, clean geometry,<br/>filter approved road classes"]
+    IN --> P1
+
+    P1 --> P2["2. Tessellation<br/>enclosed tessellation from Gabriel-buffer enclosures"]
+    P2 --> QA{"Every building<br/>has a cell?"}
+    QA -- "no" --> DROP["Drop uncovered buildings,<br/>regenerate enclosures"]
+    DROP --> P2
+    QA -- "yes" --> P3["3. Graphs<br/>building / tessellation / street contiguity graphs"]
+
+    P3 --> P4["4. Morphometrics<br/>~75 momepy characters per building & cell"]
+    P4 --> P5["5. Merge characters<br/>join into one primary_chars table"]
+
+    P5 --> P6["6. Morphotopes<br/>per connected component of the tessellation graph"]
+    P6 --> SIZE{"Component size<br/>> 75 cells?"}
+    SIZE -- "no" --> NOISE0["Label whole component 'noise' (-1)<br/>— too small to regionalize"]
+    SIZE -- "yes" --> WARD["QuantileTransformer + Ward clustering<br/>(constrained by tessellation graph)<br/>→ extract morphotope clusters"]
+
+    NOISE0 --> P7
+    WARD --> P7["7. Postprocess<br/>reconcile morphotopes split across<br/>building components (majority-vote label)"]
+
+    P7 --> P8["8. Morphotope characters<br/>aggregate shape / spacing stats —<br/>computed for EVERY morphotope, noise included"]
+    P8 --> SPLIT{"Morphotope label<br/>ends in _-1 (noise)?"}
+
+    SPLIT -- "no, real morphotope" --> P9["9. Taxonomy clustering<br/>StandardScaler + KNN(k=10) + Ward —<br/>noise morphotopes dropped here, not before"]
+    P9 --> P9b["9b. Map taxonomy back<br/>onto non-noise tessellation cells"]
+
+    SPLIT -- "yes, noise" --> HOLD["Set aside — has shape stats,<br/>but excluded from Stage 9 clustering"]
+    HOLD --> P10["10. Noise reassignment<br/>group by contiguity, then KNN-classify<br/>each group against the taxonomy from 9"]
+    P9 -. "taxonomy centroids" .-> P10
+
+    P9b --> REJOIN(("Rejoin"))
+    P10 --> REJOIN
+    REJOIN --> P11["11. Export<br/>every cell now has a final type → GeoJSON / GPKG"]
+    P11 --> OUT[("Region taxonomy map")]

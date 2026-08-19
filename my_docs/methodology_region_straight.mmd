@@ -1,0 +1,20 @@
+%% Urban Form Taxonomy — Single-Region Methodology (straight-line version)
+%% Buildings pipeline: notebooks_buidings/01..11 (one boundary, run start-to-finish)
+
+flowchart TD
+    IN["Inputs<br/>Building footprints (OBPL-CA) + road network (OSM) + region boundary"]
+    P1["1. Preprocess<br/>clip to boundary, clean geometry, filter approved road classes"]
+    P2["2. Tessellation<br/>Gabriel-buffer enclosures + enclosed tessellation"]
+    P3["3. Graphs<br/>building / tessellation / street contiguity graphs"]
+    P4["4. Morphometrics<br/>~75 momepy characters per building & cell"]
+    P5["5. Merge characters<br/>join into one primary_chars table"]
+    P6["6. Morphotopes<br/>QuantileTransformer + Ward clustering constrained by tessellation graph"]
+    P7["7. Postprocess<br/>fix morphotopes split across building components"]
+    P8["8. Morphotope characters<br/>aggregate shape / spacing stats per morphotope"]
+    P9["9. Hierarchical taxonomy clustering<br/>StandardScaler + KNN(k=10) + Ward, cut into 7 levels"]
+    P9b["9b. Map taxonomy back onto tessellation cells"]
+    P10["10. Noise reassignment<br/>KNN classifier assigns unclustered cells to nearest type"]
+    P11["11. Export<br/>building + morphotope layers → GeoJSON / GPKG"]
+    OUT[("Region taxonomy map")]
+
+    IN --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7 --> P8 --> P9 --> P9b --> P10 --> P11 --> OUT

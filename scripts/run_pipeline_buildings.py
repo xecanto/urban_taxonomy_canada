@@ -26,6 +26,9 @@ Region-chunked run for a whole country (see --regions-shapefile below).
 Safe to re-run the exact same command after an interruption — already
 completed regions/phases are skipped automatically (see --no-resume):
     .venv\\Scripts\\python.exe scripts\\run_pipeline_buildings.py --city canada --regions-shapefile config/regions.gpkg --region-id-col CDUID --timeout -1
+    python scripts\\run_pipeline_buildings.py --city canada --regions-shapefile "C:\\Users\\abdur\\Downloads\\canada\\lcd_000b21a_e\\ca_census.shp" --region-id-col CDUID --timeout -1
+    python scripts\\run_pipeline_buildings.py --config config/canada_cma_ca.env --regions-shapefile data\\CMA_CA_boundaries.gdb --region-id-col CMAUID --timeout -1
+
 """
 
 import argparse

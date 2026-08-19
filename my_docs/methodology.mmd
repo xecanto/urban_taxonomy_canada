@@ -1,0 +1,55 @@
+%% Urban Form Taxonomy — Region-Chunked Methodology
+%% Buildings pipeline: notebooks_buidings/01..11 + scripts/region_pipeline.py
+
+flowchart TD
+    subgraph INPUT["Inputs"]
+        BLDG[("Building footprints<br/>OBPL-CA (~13.7M buildings)")]
+        ROADS[("Road network<br/>OSM streets")]
+        REGIONS[("Region boundaries<br/>Census Divisions, n=293")]
+    end
+
+    REGIONS --> BUFFER["Buffer each region +500m<br/>(preserves tessellation/graph context<br/>right up to the true edge)"]
+
+    subgraph LOOP["Phases 1-8 — run independently per region"]
+        direction TB
+        P1["1. Preprocess<br/>clip to buffered boundary, clean geometry,<br/>filter approved road classes"]
+        P2["2. Tessellation<br/>Gabriel-buffer enclosures + enclosed tessellation"]
+        P3["3. Graphs<br/>building / tessellation / street contiguity graphs"]
+        P4["4. Morphometrics<br/>~75 momepy characters per building & cell"]
+        P5["5. Merge characters<br/>join into one primary_chars table"]
+        P6["6. Morphotopes<br/>QuantileTransformer (fit per region) +<br/>Ward clustering constrained by tessellation graph"]
+        P7["7. Postprocess<br/>fix morphotopes split across building components"]
+        P8["8. Morphotope characters<br/>aggregate shape / spacing stats per morphotope"]
+        P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7 --> P8
+    end
+
+    BLDG --> P1
+    ROADS --> P1
+    BUFFER --> P1
+
+    P1 --> MASK["core_mask<br/>flag buffer-ring buildings<br/>(outside the TRUE region boundary)"]
+
+    P8 --> POOL["Pool every region's morphotope table<br/>prefix labels R{region}_ for global uniqueness"]
+
+    subgraph GLOBALSTEP["Phase 9 — runs ONCE, globally"]
+        direction TB
+        GLOBAL["Hierarchical taxonomy clustering<br/>StandardScaler + KNN(k=10) + Ward,<br/>fit across ALL regions' pooled morphotopes"]
+        HIER["Cut dendrogram into 7 levels<br/>2 → 4 → 8 → 16 → 32 → 64 → 128 types"]
+        GLOBAL --> HIER
+    end
+
+    POOL --> GLOBAL
+
+    subgraph TAIL["Phases 9b-11 — run per region, against the shared taxonomy"]
+        direction TB
+        P9b["9b. Map shared taxonomy<br/>back onto this region's own tessellation cells"]
+        P10["10. Noise reassignment<br/>KNN classifier assigns unclustered cells<br/>to nearest taxonomy type"]
+        P11["11. Export<br/>building + morphotope layers → GeoJSON / GPKG"]
+        P9b --> P10 --> P11
+    end
+
+    HIER --> P9b
+
+    MASK --> MERGE
+    P11 --> MERGE["Merge final exports<br/>drop buffer-ring duplicates via core_mask"]
+    MERGE --> OUT[("Country-wide taxonomy map<br/>one consistent set of types everywhere")]

@@ -1,9 +1,18 @@
-r"""Small Flask API for serving the generated PMTiles export.
+r"""Small Flask API for serving the generated per-region PMTiles exports.
 
 Run from the project root:
   .venv\Scripts\python.exe app.py
 
-The PMTiles file is served at /tiles and a small metadata endpoint is available at /api/tiles.
+Serves the whole tiles/ directory (produced by
+scripts/export_region_geojsonl.py + scripts/build_pmtiles.sh) under /tiles,
+e.g.:
+
+  GET /tiles/winnipeg/buildings.pmtiles
+  GET /tiles/regions_manifest.json
+
+This mirrors the exact URL layout the static files will have once uploaded
+to a real host — the viewer only ever needs TILES_BASE_URL (see
+urban_taxonomy_viewer/src/config/regions.ts) to change, not the paths.
 """
 
 from __future__ import annotations
@@ -11,18 +20,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file
+from flask import Flask, abort, request, send_from_directory
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_PMtiles = BASE_DIR / "outputs_buildings" / "11_exports" / "winnipeg.pmtiles"
+DEFAULT_TILES_DIR = BASE_DIR.parent / "urban_taxonomy_viewer" / "tiles"
 
 
-def _resolve_pmtiles_path() -> Path:
-    configured = os.environ.get("PMTILES_FILE")
+def _resolve_tiles_dir() -> Path:
+    configured = os.environ.get("TILES_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
-    return DEFAULT_PMtiles
+    return DEFAULT_TILES_DIR
 
 
 app = Flask(__name__)
@@ -53,33 +62,25 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/api/tiles")
-def tiles_info():
-    pmtiles_path = _resolve_pmtiles_path()
-    return {
-        "url": "/tiles",
-        "file": str(pmtiles_path),
-    }
+@app.get("/tiles/<path:subpath>")
+def tiles_file(subpath: str):
+    tiles_dir = _resolve_tiles_dir()
+    if not tiles_dir.exists():
+        abort(404, f"Tiles directory not found: {tiles_dir}")
 
-
-@app.get("/tiles")
-def tiles_file():
-    pmtiles_path = _resolve_pmtiles_path()
-    if not pmtiles_path.exists():
-        return jsonify({"error": f"PMTiles file not found: {pmtiles_path}"}), 404
-
-    return send_file(
-        pmtiles_path,
-        mimetype="application/vnd.pmtiles",
-        as_attachment=False,
-        download_name=pmtiles_path.name,
+    mimetype = "application/vnd.pmtiles" if subpath.endswith(".pmtiles") else None
+    # send_from_directory resolves subpath safely under tiles_dir (rejects
+    # any ../ escape) and handles Range requests + conditional GET for us.
+    return send_from_directory(
+        tiles_dir, subpath,
+        mimetype=mimetype,
         conditional=True,
         etag=True,
     )
 
 
-@app.route("/tiles", methods=["OPTIONS"])
-def tiles_preflight():
+@app.route("/tiles/<path:subpath>", methods=["OPTIONS"])
+def tiles_preflight(subpath: str):
     return ("", 204)
 
 

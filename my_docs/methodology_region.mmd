@@ -1,0 +1,32 @@
+%% Urban Form Taxonomy — Single-Region Methodology
+%% Buildings pipeline: notebooks_buidings/01..11 (one boundary, run start-to-finish)
+
+flowchart TD
+    subgraph INPUT["Inputs"]
+        BLDG[("Building footprints<br/>OBPL-CA")]
+        ROADS[("Road network<br/>OSM streets")]
+        BOUND[("City / region boundary")]
+    end
+
+    BLDG --> P1
+    ROADS --> P1
+    BOUND --> P1
+
+    P1["1. Preprocess<br/>clip to boundary, clean geometry,<br/>filter approved road classes"]
+    P2["2. Tessellation<br/>Gabriel-buffer enclosures + enclosed tessellation"]
+    P3["3. Graphs<br/>building / tessellation / street contiguity graphs"]
+    P4["4. Morphometrics<br/>~75 momepy characters per building & cell"]
+    P5["5. Merge characters<br/>join into one primary_chars table"]
+    P6["6. Morphotopes<br/>QuantileTransformer (fit on this whole region) +<br/>Ward clustering constrained by tessellation graph"]
+    P7["7. Postprocess<br/>fix morphotopes split across building components"]
+    P8["8. Morphotope characters<br/>aggregate shape / spacing stats per morphotope"]
+    P9["9. Hierarchical taxonomy clustering<br/>StandardScaler + KNN(k=10) + Ward"]
+    HIER["Cut dendrogram into 7 levels<br/>2 → 4 → 8 → 16 → 32 → 64 → 128 types"]
+    P9b["9b. Map taxonomy back<br/>onto tessellation cells"]
+    P10["10. Noise reassignment<br/>KNN classifier assigns unclustered cells<br/>to nearest taxonomy type"]
+    P11["11. Export<br/>building + morphotope layers → GeoJSON / GPKG"]
+
+    P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7 --> P8 --> P9
+    P9 --> HIER --> P9b --> P10 --> P11
+
+    P11 --> OUT[("Region taxonomy map")]

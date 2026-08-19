@@ -1,0 +1,147 @@
+%% Urban Form Taxonomy — Single-Region Methodology (staged + real branch points)
+%% Buildings pipeline: notebooks_buidings/01..11 (one boundary, run start-to-finish)
+
+flowchart TD
+    BLDG[("Building footprints<br/>OBPL-CA")]
+    ROADS[("Road network<br/>OSM streets")]
+    BOUND[("Region boundary")]
+
+    subgraph S1["Stage 1 — Data Preparation"]
+        direction TB
+        P1["1. Preprocess<br/>clip to boundary, clean geometry,<br/>filter approved road classes"]
+    end
+
+    subgraph S2["Stage 2 — Spatial Units & Characters"]
+        direction TB
+        P2["2. Tessellation<br/>enclosed tessellation from Gabriel-buffer enclosures"]
+        QA{"Every building<br/>has a cell?"}
+        DROP["Drop uncovered buildings,<br/>regenerate enclosures"]
+        P3["3. Graphs<br/>building / tessellation / street contiguity graphs"]
+        P4["4. Morphometrics<br/>~75 momepy characters per building & cell"]
+        P5["5. Merge characters<br/>join into one primary_chars table"]
+
+        P2 --> QA
+        QA -- "no" --> DROP --> P2
+        QA -- "yes" --> P3 --> P4 --> P5
+    end
+
+    subgraph S3["Stage 3 — Morphotope Clustering"]
+        direction TB
+        P6["6. Morphotopes<br/>per connected component of the tessellation graph"]
+        SIZE{"Component size<br/>> 75 cells?"}
+        NOISE0["Label whole component 'noise' (-1)<br/>— too small to regionalize"]
+        WARD["QuantileTransformer + Ward clustering<br/>(constrained by tessellation graph)<br/>→ extract morphotope clusters"]
+        P7["7. Postprocess<br/>reconcile morphotopes split across<br/>building components (majority-vote label)"]
+        P8["8. Morphotope characters<br/>aggregate shape / spacing stats —<br/>computed for EVERY morphotope, noise included"]
+
+        P6 --> SIZE
+        SIZE -- "no" --> NOISE0 --> P7
+        SIZE -- "yes" --> WARD --> P7
+        P7 --> P8
+    end
+
+    SPLIT{"Morphotope label<br/>ends in _-1 (noise)?"}
+    P8 --> SPLIT
+
+    subgraph S4["Stage 4 — Taxonomy & Export"]
+        direction TB
+        P9["9. Taxonomy clustering<br/>StandardScaler + KNN(k=10) + Ward, cut into 7 levels —<br/>noise morphotopes dropped here, not before"]
+        P9b["9b. Map taxonomy back<br/>onto non-noise tessellation cells"]
+        HOLD["Noise cells set aside<br/>(no taxonomy assignment yet)"]
+        P10["10. Noise reassignment<br/>group by contiguity, then KNN-classify<br/>each group against Stage 9's taxonomy"]
+        P11["11. Export<br/>every cell now has a final type → GeoJSON / GPKG"]
+
+        P9 --> P9b
+        HOLD --> P10
+        P9 -. "taxonomy centroids" .-> P10
+        P9b --> REJOIN(("Rejoin"))
+        P10 --> REJOIN
+        REJOIN --> P11
+    end
+
+    SPLIT -- "no, real morphotope" --> P9
+    SPLIT -- "yes, noise" --> HOLD
+
+    OUT_SPATIAL[("Spatial Layers<br/>buildings & morphotopes, by taxonomy type<br/>GeoJSON / GeoPackage")]
+    OUT_SUMMARY[("Summary & Metadata<br/>per-morphotope statistics,<br/>taxonomy hierarchy profile")]
+
+    BLDG --> S1
+    ROADS --> S1
+    BOUND --> S1
+    S1 --> S2 --> S3
+
+    P11 --> OUT_SPATIAL
+    P11 --> OUT_SUMMARY
+
+
+
+%% Node classes
+classDef preparation fill:#EAF2FF,color:#183153,stroke:#5B8CCB,stroke-width:1.5px;
+classDef spatial fill:#E8F7F5,color:#174A47,stroke:#43A49B,stroke-width:1.5px;
+classDef clustering fill:#F1ECFA,color:#49396B,stroke:#8A72B5,stroke-width:1.5px;
+classDef taxonomy fill:#ECF8EE,color:#275737,stroke:#62A873,stroke-width:1.5px;
+classDef decision fill:#FFF6D8,color:#594713,stroke:#D3A72C,stroke-width:2px;
+classDef noise fill:#FFF0F0,color:#732D35,stroke:#CE6872,stroke-width:1.5px,stroke-dasharray:5 3;
+classDef merge fill:#F8FAFC,color:#334155,stroke:#64748B,stroke-width:2px;
+
+%% Assign classes
+class P1 preparation;
+class P2,P3,P4,P5 spatial;
+class P6,WARD,P7,P8 clustering;
+class P9,P9b,P10,P11 taxonomy;
+class QA,SIZE,SPLIT decision;
+class DROP,NOISE0,HOLD noise;
+class REJOIN merge;
+
+%% Subgraph styling
+style S1 fill:#F4F8FF,stroke:#7DA2D6,stroke-width:2px,color:#183153;
+style S2 fill:#F1FAF9,stroke:#65B4AD,stroke-width:2px,color:#174A47;
+style S3 fill:#F8F5FC,stroke:#A18BC8,stroke-width:2px,color:#49396B;
+style S4 fill:#F3FAF4,stroke:#7CB98A,stroke-width:2px,color:#275737;
+
+%% Default connection styling
+linkStyle default stroke:#64748B,stroke-width:1.6px;
+
+
+
+
+%% Configuration Tab 
+{
+  "theme": "base",
+  "look": "classic",
+  "layout": "dagre",
+  "htmlLabels": true,
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 35,
+    "rankSpacing": 55,
+    "padding": 14
+  },
+  "themeVariables": {
+    "background": "#F7F9FC",
+    "fontFamily": "Inter, Aptos, Segoe UI, Arial, sans-serif",
+    "fontSize": "15px",
+
+    "primaryColor": "#FFFFFF",
+    "primaryTextColor": "#172033",
+    "primaryBorderColor": "#64748B",
+
+    "secondaryColor": "#EEF4FF",
+    "secondaryTextColor": "#172033",
+    "secondaryBorderColor": "#7C9BC7",
+
+    "tertiaryColor": "#F4F1FA",
+    "tertiaryTextColor": "#30284F",
+    "tertiaryBorderColor": "#9B8BC4",
+
+    "lineColor": "#64748B",
+    "textColor": "#172033",
+    "mainBkg": "#FFFFFF",
+    "nodeBorder": "#94A3B8",
+    "nodeTextColor": "#172033",
+    "clusterBkg": "#FFFFFF",
+    "clusterBorder": "#CBD5E1",
+    "edgeLabelBackground": "#F7F9FC",
+    "titleColor": "#172033"
+  }
+}

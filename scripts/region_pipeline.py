@@ -175,6 +175,20 @@ def load_regions(shapefile_path, id_col, target_crs):
         print(f"  Fixing {n_invalid} invalid region geometries (make_valid)")
         regions["geometry"] = regions.geometry.make_valid()
 
+    # Some region datasets split one true area into multiple rows sharing the
+    # same id — e.g. StatCan's CMA/CA boundaries give Ottawa-Gatineau,
+    # Lloydminster, Hawkesbury, and Campbellton one row per province, all
+    # under the same CMAUID (since they straddle a provincial line). Downstream
+    # code keys each region's output folder by id alone, so leaving duplicates
+    # as-is would make the second row silently overwrite the first's outputs
+    # — and would re-split exactly the kind of cross-boundary metro this
+    # region-chunked approach exists to keep whole. Dissolve them into one
+    # multi-part polygon per id instead.
+    dupe_ids = regions[id_col][regions[id_col].duplicated(keep=False)].unique()
+    if len(dupe_ids):
+        print(f"  Dissolving {len(dupe_ids)} region ids split across multiple rows: {sorted(dupe_ids)}")
+        regions = regions.dissolve(by=id_col, as_index=False)
+
     return regions
 
 

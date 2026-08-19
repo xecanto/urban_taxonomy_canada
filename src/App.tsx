@@ -98,6 +98,12 @@ export default function App() {
   const [clickedProps, setClickedProps] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
   const [globalClusterSummary, setGlobalClusterSummary] = useState<GlobalClusterSummary | null>(null);
+  // The no-CHM run is its own separate clustering pass — genuinely different
+  // taxonomy structure. Only the Hierarchy Tree uses this (see taxonomyTree
+  // below); the legend/map-coloring stay on globalClusterSummary (the CHM
+  // one) always, by design, so a color keeps meaning the same cluster id
+  // regardless of which dataset's buildings are shown.
+  const [nochmClusterSummary, setNochmClusterSummary] = useState<GlobalClusterSummary | null>(null);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [featureCounts, setFeatureCounts] = useState({ buildings: 0 });
@@ -140,12 +146,17 @@ export default function App() {
   const paintColors = generateColors(paintRows.length, bldgSym.ramp as RampName);
   const colorForKey = new Map(paintRows.map((r, i) => [r.key, paintColors[i]]));
 
-  // The Hierarchy Tree panel's data — built once from the same global
-  // summary (see buildTaxonomyTree), so it's identical and always available
-  // for every region, unlike the old per-region dendrogram asset.
+  // The Hierarchy Tree panel's data — built from the global summary matching
+  // whichever dataset's buildings are currently shown (CHM vs no-CHM are
+  // separate clustering passes with genuinely different structure), so it's
+  // always available for every region regardless, unlike the old per-region
+  // dendrogram asset. Node/link colors still come from the CHM cluster ids
+  // (clusterIds/ramp, unchanged) so a given color keeps meaning the same
+  // cluster id in the tree no matter which dataset it's currently drawing.
+  const activeClusterSummary = tileVariant === "tiles_nochm" ? nochmClusterSummary : globalClusterSummary;
   const taxonomyTree = useMemo(
-    () => (globalClusterSummary ? buildTaxonomyTree(globalClusterSummary) : null),
-    [globalClusterSummary],
+    () => (activeClusterSummary ? buildTaxonomyTree(activeClusterSummary) : null),
+    [activeClusterSummary],
   );
 
   // ── Load the region list once (name, province, bbox, building count) ──
@@ -164,6 +175,14 @@ export default function App() {
         setGlobalClusterSummary(summary);
         if (summary) setClusterIds(clusterIdsForLevel(summary, bldgSymRef.current.level));
       })
+      .catch(() => {});
+  }, []);
+
+  // Hierarchy Tree only — see nochmClusterSummary above.
+  useEffect(() => {
+    fetch(`${import.meta.env.BASE_URL}data/global_cluster_summary_nochm.json`)
+      .then(r => (r.ok ? r.json() : null))
+      .then((summary: GlobalClusterSummary | null) => setNochmClusterSummary(summary))
       .catch(() => {});
   }, []);
 

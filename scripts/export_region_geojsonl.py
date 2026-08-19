@@ -14,6 +14,13 @@ Run from the repo root with the project venv:
     .venv\\Scripts\\python.exe scripts\\export_region_geojsonl.py
     .venv\\Scripts\\python.exe scripts\\export_region_geojsonl.py --force
     .venv\\Scripts\\python.exe scripts\\export_region_geojsonl.py --only 001,535
+
+For a different run (e.g. the no-CHM country pass, a separate OUTPUT_ROOT
+with the same CITY_SLUG), point --regions-root at its regions/ folder and
+--output-dir at a separate tiles folder so it doesn't overwrite the first:
+    .venv\\Scripts\\python.exe scripts\\export_region_geojsonl.py ^
+        --regions-root outputs_canada_cma_ca_nochm\\regions ^
+        --output-dir ..\\urban_taxonomy_viewer\\tiles_nochm
 """
 
 import argparse
@@ -27,8 +34,6 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 BOUNDARIES_GDB = ROOT / "data" / "CMA_CA_boundaries.gdb"
-REGIONS_DIR = ROOT / "outputs_canada_cma_ca" / "regions"
-CITY_SLUG = "canada_cma_ca"  # matches CITY_SLUG used when the region pipeline wrote these exports
 
 
 def slugify(name):
@@ -57,16 +62,24 @@ def load_region_names():
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--viewer-root", default=str(ROOT.parent / "urban_taxonomy_viewer"))
+    parser.add_argument("--output-dir", default=None,
+                         help="Where to write tiles/<slug>/buildings.geojsonl (default: <viewer-root>/tiles)")
+    parser.add_argument("--regions-root", default=str(ROOT / "outputs_canada_cma_ca" / "regions"),
+                         help="Path to a region-chunked run's regions/ folder (default: outputs_canada_cma_ca/regions)")
+    parser.add_argument("--city-slug", default="canada_cma_ca",
+                         help="CITY_SLUG the region pipeline wrote exports under (default: canada_cma_ca)")
     parser.add_argument("--force", action="store_true", help="Re-export even if buildings.geojsonl already exists")
     parser.add_argument("--only", default=None, help="Comma-separated CMAUID region ids to export (default: all)")
     args = parser.parse_args()
 
-    tiles_dir = Path(args.viewer_root) / "tiles"
+    city_slug = args.city_slug
+    regions_dir = Path(args.regions_root)
+    tiles_dir = Path(args.output_dir) if args.output_dir else Path(args.viewer_root) / "tiles"
     tiles_dir.mkdir(parents=True, exist_ok=True)
 
     names, types, prov = load_region_names()
 
-    region_dirs = sorted(p for p in REGIONS_DIR.iterdir() if p.is_dir())
+    region_dirs = sorted(p for p in regions_dir.iterdir() if p.is_dir())
     if args.only:
         wanted = set(args.only.split(","))
         region_dirs = [p for p in region_dirs if p.name in wanted]
@@ -78,7 +91,7 @@ def main():
 
     for i, region_dir in enumerate(region_dirs, start=1):
         rid = region_dir.name
-        gpkg = region_dir / "11_exports" / f"{CITY_SLUG}_{rid}_taxonomy.gpkg"
+        gpkg = region_dir / "11_exports" / f"{city_slug}_{rid}_taxonomy.gpkg"
         if not gpkg.exists():
             print(f"[{i}/{len(region_dirs)}] {rid}: no export gpkg — skipping")
             skipped.append(rid)

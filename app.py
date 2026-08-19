@@ -3,12 +3,14 @@ r"""Small Flask API for serving the generated per-region PMTiles exports.
 Run from the project root:
   .venv\Scripts\python.exe app.py
 
-Serves the whole tiles/ directory (produced by
-scripts/export_region_geojsonl.py + scripts/build_pmtiles.sh) under /tiles,
-e.g.:
+Serves tiles/ (the CHM run) and tiles_nochm/ (same 152 regions/slugs, same
+taxonomy, no CHM columns) — both produced by
+scripts/export_region_geojsonl.py + scripts/build_pmtiles.sh — directly
+under their own folder name, e.g.:
 
   GET /tiles/winnipeg/buildings.pmtiles
   GET /tiles/regions_manifest.json
+  GET /tiles_nochm/winnipeg/buildings.pmtiles
 
 This mirrors the exact URL layout the static files will have once uploaded
 to a real host — the viewer only ever needs TILES_BASE_URL (see
@@ -24,14 +26,17 @@ from flask import Flask, abort, request, send_from_directory
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_TILES_DIR = BASE_DIR.parent / "urban_taxonomy_viewer" / "tiles"
+VIEWER_ROOT = BASE_DIR.parent / "urban_taxonomy_viewer"
+# Whitelisted, not a free-form path segment, so this can't be used to serve
+# arbitrary folders from the viewer checkout.
+ALLOWED_DATASETS = {"tiles", "tiles_nochm"}
 
 
-def _resolve_tiles_dir() -> Path:
-    configured = os.environ.get("TILES_DIR")
+def _resolve_dataset_dir(dataset: str) -> Path:
+    configured = os.environ.get(f"{dataset.upper()}_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
-    return DEFAULT_TILES_DIR
+    return VIEWER_ROOT / dataset
 
 
 app = Flask(__name__)
@@ -62,9 +67,11 @@ def health():
     return {"status": "ok"}
 
 
-@app.get("/tiles/<path:subpath>")
-def tiles_file(subpath: str):
-    tiles_dir = _resolve_tiles_dir()
+@app.get("/<dataset>/<path:subpath>")
+def tiles_file(dataset: str, subpath: str):
+    if dataset not in ALLOWED_DATASETS:
+        abort(404)
+    tiles_dir = _resolve_dataset_dir(dataset)
     if not tiles_dir.exists():
         abort(404, f"Tiles directory not found: {tiles_dir}")
 
@@ -79,8 +86,8 @@ def tiles_file(subpath: str):
     )
 
 
-@app.route("/tiles/<path:subpath>", methods=["OPTIONS"])
-def tiles_preflight(subpath: str):
+@app.route("/<dataset>/<path:subpath>", methods=["OPTIONS"])
+def tiles_preflight(dataset: str, subpath: str):
     return ("", 204)
 
 

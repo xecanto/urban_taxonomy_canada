@@ -4,7 +4,7 @@ import gsap from "gsap";
 import {
   SegmentedControl, Stack, Text, Paper, ScrollArea,
   ActionIcon, useMantineColorScheme, Badge, Table,
-  Divider, Group, Accordion, Tooltip, Select,
+  Divider, Group, Accordion, Tooltip, Select, Checkbox,
 } from "@mantine/core";
 import {
   IconSun, IconMoon, IconX,
@@ -21,7 +21,7 @@ import type { RampName } from "./utils/colors";
 import type { LayerSymbology, GlobalClusterSummary } from "./utils/types";
 import { buildLegendRows, clusterKey, parseClusterKey, buildTaxonomyTree } from "./utils/frontier";
 import { fetchRegions, pmtilesUrl } from "./config/regions";
-import type { RegionConfig } from "./config/regions";
+import type { RegionConfig, TileVariant } from "./config/regions";
 
 const BASEMAPS: Record<string, { name: string; url: string }> = {
   osm: { name: "OSM", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png" },
@@ -109,6 +109,9 @@ export default function App() {
   // floating widget's own size/shape — circle for circular, wider box for
   // vertical — depends on it, and that's App's concern, not the tree's.
   const [treeMode, setTreeMode] = useState<LayoutMode>("radial");
+  // Which pipeline run's building tiles to show. Same 152 regions/slugs,
+  // same taxonomy/legend/coloring either way — see config/regions.ts.
+  const [tileVariant, setTileVariant] = useState<TileVariant>("tiles");
 
   const levelOptions = [
     { value: "level_1", label: "2 clusters (coarsest)" },
@@ -280,13 +283,34 @@ export default function App() {
   }, [bldgSym, paintRows, paintColors, mapReady]);
   useEffect(() => { applyBldgSymbology(); }, [applyBldgSymbology]);
 
-  // ── Swap the buildings source to a different region's PMTiles ─────────
-  const loadRegionTiles = useCallback((map: maplibregl.Map, slug: string) => {
+  // Also called directly after swapping the CHM/no-CHM tile source (see
+  // toggleNoChm below) — that removes+re-adds the layer, which drops any
+  // filter that was set on the old one, and this effect alone wouldn't
+  // notice since filterClusters itself didn't change.
+  const applyMapFilter = useCallback(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer("buildings-fill")) return;
+    if (filterClusters.size === 0) {
+      map.setFilter("buildings-fill", null);
+      map.setFilter("buildings-line", null);
+      return;
+    }
+    const anyOf = Array.from(filterClusters).map(key => {
+      const { level, cluster } = parseClusterKey(key);
+      return ["==", ["get", level], cluster];
+    });
+    const filter = ["any", ...anyOf] as any;
+    map.setFilter("buildings-fill", filter);
+    map.setFilter("buildings-line", filter);
+  }, [filterClusters]);
+
+  // ── Swap the buildings source to a different region's (or variant's) PMTiles ──
+  const loadRegionTiles = useCallback((map: maplibregl.Map, slug: string, variant: TileVariant) => {
     if (map.getLayer("buildings-fill")) map.removeLayer("buildings-fill");
     if (map.getLayer("buildings-line")) map.removeLayer("buildings-line");
     if (map.getSource(TAXONOMY_SOURCE)) map.removeSource(TAXONOMY_SOURCE);
 
-    map.addSource(TAXONOMY_SOURCE, { type: "vector", url: pmtilesUrl(slug) });
+    map.addSource(TAXONOMY_SOURCE, { type: "vector", url: pmtilesUrl(slug, variant) });
     map.addLayer({ id: "buildings-fill", type: "fill",
       source: TAXONOMY_SOURCE, "source-layer": "buildings",
       paint: { "fill-color": "#888", "fill-opacity": 0.8 } });
@@ -304,7 +328,7 @@ export default function App() {
 
     const map = mapRef.current;
     if (map && mapReady) {
-      loadRegionTiles(map, slug);
+      loadRegionTiles(map, slug, tileVariant);
       applyBldgSymbology();
       if (region.bbox) map.fitBounds(bboxToBounds(region.bbox), { padding: 40, duration: 1500 });
       else map.flyTo({ center: region.center, zoom: 11, duration: 1500 });
@@ -313,7 +337,20 @@ export default function App() {
     setFeatureCounts({ buildings: region.nBuildings });
     setFilterClusters(new Set());
     setClickedProps(null);
-  }, [regions, loadRegionTiles, applyBldgSymbology, mapReady]);
+  }, [regions, loadRegionTiles, applyBldgSymbology, mapReady, tileVariant]);
+
+  // ── CHM / no-CHM toggle: same region, same view, same legend/filter —
+  // just swap which pipeline run's building tiles are drawn. ──
+  const toggleNoChm = useCallback((useNoChm: boolean) => {
+    const variant: TileVariant = useNoChm ? "tiles_nochm" : "tiles";
+    setTileVariant(variant);
+    const map = mapRef.current;
+    if (map && mapReady && selectedRegion) {
+      loadRegionTiles(map, selectedRegion, variant);
+      applyBldgSymbology();
+      applyMapFilter();
+    }
+  }, [mapReady, selectedRegion, loadRegionTiles, applyBldgSymbology, applyMapFilter]);
 
   // ── Init map (once) ─────────────────────────────────────
   useEffect(() => {
@@ -356,7 +393,7 @@ export default function App() {
     const defaultRegion = regions.find(r => r.slug === "winnipeg") ?? regions[0];
 
     setSelectedRegion(defaultRegion.slug);
-    loadRegionTiles(map, defaultRegion.slug);
+    loadRegionTiles(map, defaultRegion.slug, tileVariant);
     setFeatureCounts({ buildings: defaultRegion.nBuildings });
     if (defaultRegion.bbox) map.fitBounds(bboxToBounds(defaultRegion.bbox), { padding: 40, duration: 0 });
     else map.jumpTo({ center: defaultRegion.center, zoom: 11 });
@@ -382,7 +419,7 @@ export default function App() {
 
     applyBldgSymbology();
     setLoading(false);
-  }, [mapReady, regions, loadRegionTiles, applyBldgSymbology]);
+  }, [mapReady, regions, loadRegionTiles, applyBldgSymbology, tileVariant]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -399,22 +436,7 @@ export default function App() {
     setFilterClusters(new Set());
   }, [bldgSym.level, globalClusterSummary]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map?.getLayer("buildings-fill")) return;
-    if (filterClusters.size === 0) {
-      map.setFilter("buildings-fill", null);
-      map.setFilter("buildings-line", null);
-      return;
-    }
-    const anyOf = Array.from(filterClusters).map(key => {
-      const { level, cluster } = parseClusterKey(key);
-      return ["==", ["get", level], cluster];
-    });
-    const filter = ["any", ...anyOf] as any;
-    map.setFilter("buildings-fill", filter);
-    map.setFilter("buildings-line", filter);
-  }, [filterClusters]);
+  useEffect(() => { applyMapFilter(); }, [applyMapFilter]);
 
   // Resize map when panels change
   useEffect(() => {
@@ -523,7 +545,14 @@ export default function App() {
                 value={basemap} onChange={setBasemap} />
 
               <Divider label="Buildings" labelPosition="left" />
-              <Group justify="flex-end" px={2}>
+              <Group justify="space-between" px={2}>
+                <Tooltip label="Same regions, taxonomy, and legend — just without CHM (canopy height) building attributes" withArrow>
+                  <Checkbox
+                    size="xs" label="No CHM"
+                    checked={tileVariant === "tiles_nochm"}
+                    onChange={(e) => toggleNoChm(e.currentTarget.checked)}
+                  />
+                </Tooltip>
                 <ActionIcon size="xs" variant="subtle"
                   onClick={() => setBldgSym(s => ({ ...s, visible: !s.visible }))}>
                   {bldgSym.visible ? <IconEye size={11} /> : <IconEyeOff size={11} />}

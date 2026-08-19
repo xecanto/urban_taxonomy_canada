@@ -29,8 +29,9 @@ dist-ssr
 # Local Netlify folder
 .netlify
 
-# Generated PMTiles (per-region, ~100MB-20GB total) — not meant for git,
-# these get uploaded straight to static hosting instead. See
+# Generated PMTiles (per-region, ~100MB-20GB total per variant) — not meant
+# for git, these get uploaded straight to static hosting instead. See
 # src/config/regions.ts (TILES_BASE_URL) and ../urban_taxonomy/app.py.
 /tiles/
+/tiles_nochm/
 *.pmtiles

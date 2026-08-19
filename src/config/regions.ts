@@ -62,6 +62,13 @@ export async function fetchRegions(): Promise<RegionConfig[]> {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function pmtilesUrl(slug: string): string {
-  return `pmtiles://${TILES_BASE_URL}/tiles/${slug}/buildings.pmtiles`;
+// "tiles" = full pipeline run (CHM/canopy stats included in the building
+// attributes); "tiles_nochm" = same 152 regions/slugs, same taxonomy
+// (level_1..level_7), same legend — just without those CHM columns. Verified
+// the two folders contain identical region slugs, so no separate manifest
+// fetch is needed for the nochm variant.
+export type TileVariant = "tiles" | "tiles_nochm";
+
+export function pmtilesUrl(slug: string, variant: TileVariant = "tiles"): string {
+  return `pmtiles://${TILES_BASE_URL}/${variant}/${slug}/buildings.pmtiles`;
 }

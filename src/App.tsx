@@ -302,10 +302,6 @@ export default function App() {
   }, [bldgSym, paintRows, paintColors, mapReady]);
   useEffect(() => { applyBldgSymbology(); }, [applyBldgSymbology]);
 
-  // Also called directly after swapping the CHM/no-CHM tile source (see
-  // toggleNoChm below) — that removes+re-adds the layer, which drops any
-  // filter that was set on the old one, and this effect alone wouldn't
-  // notice since filterClusters itself didn't change.
   const applyMapFilter = useCallback(() => {
     const map = mapRef.current;
     if (!map?.getLayer("buildings-fill")) return;
@@ -323,13 +319,16 @@ export default function App() {
     map.setFilter("buildings-line", filter);
   }, [filterClusters]);
 
-  // ── Swap the buildings source to a different region's (or variant's) PMTiles ──
-  const loadRegionTiles = useCallback((map: maplibregl.Map, slug: string, variant: TileVariant) => {
+  // ── (Re)point the buildings source at one merged, country-wide PMTiles
+  // archive for the given variant — not a per-region file. Only called on
+  // init and when the CHM/no-CHM toggle flips; selecting a region never
+  // touches this (see selectRegion below). ──
+  const loadTiles = useCallback((map: maplibregl.Map, variant: TileVariant) => {
     if (map.getLayer("buildings-fill")) map.removeLayer("buildings-fill");
     if (map.getLayer("buildings-line")) map.removeLayer("buildings-line");
     if (map.getSource(TAXONOMY_SOURCE)) map.removeSource(TAXONOMY_SOURCE);
 
-    map.addSource(TAXONOMY_SOURCE, { type: "vector", url: pmtilesUrl(slug, variant) });
+    map.addSource(TAXONOMY_SOURCE, { type: "vector", url: pmtilesUrl(variant) });
     map.addLayer({ id: "buildings-fill", type: "fill",
       source: TAXONOMY_SOURCE, "source-layer": "buildings",
       paint: { "fill-color": "#888", "fill-opacity": 0.8 } });
@@ -338,7 +337,9 @@ export default function App() {
       paint: { "line-color": "#333", "line-width": 0.4, "line-opacity": 0.5 } });
   }, []);
 
-  // ── Region selection: swap tiles, fly to it, best-effort hierarchy fetch ──
+  // ── Region selection: every region's buildings are already in the one
+  // loaded PMTiles source, so this is purely a camera move — no source swap,
+  // no flicker, no re-fetch. ──
   const selectRegion = useCallback((slug: string | null) => {
     if (!slug) return;
     const region = regions.find(r => r.slug === slug);
@@ -347,8 +348,6 @@ export default function App() {
 
     const map = mapRef.current;
     if (map && mapReady) {
-      loadRegionTiles(map, slug, tileVariant);
-      applyBldgSymbology();
       if (region.bbox) map.fitBounds(bboxToBounds(region.bbox), { padding: 40, duration: 1500 });
       else map.flyTo({ center: region.center, zoom: 11, duration: 1500 });
     }
@@ -356,21 +355,21 @@ export default function App() {
     setFeatureCounts({ buildings: region.nBuildings });
     setFilterClusters(new Set());
     setClickedProps(null);
-  }, [regions, loadRegionTiles, applyBldgSymbology, mapReady, tileVariant]);
+  }, [regions, mapReady]);
 
   // ── CHM / no-CHM toggle: same region, same view — swap which pipeline
-  // run's building tiles are drawn. Legend/tree/filter/drill-down all follow
-  // automatically via activeClusterSummary (see above) once tileVariant
-  // changes, so this only needs to touch the map layer itself. ──
+  // run's merged tile archive is drawn. Legend/tree/filter/drill-down all
+  // follow automatically via activeClusterSummary (see above) once
+  // tileVariant changes, so this only needs to touch the map layer itself. ──
   const toggleNoChm = useCallback((useNoChm: boolean) => {
     const variant: TileVariant = useNoChm ? "tiles_nochm" : "tiles";
     setTileVariant(variant);
     const map = mapRef.current;
-    if (map && mapReady && selectedRegion) {
-      loadRegionTiles(map, selectedRegion, variant);
+    if (map && mapReady) {
+      loadTiles(map, variant);
       applyBldgSymbology();
     }
-  }, [mapReady, selectedRegion, loadRegionTiles, applyBldgSymbology]);
+  }, [mapReady, loadTiles, applyBldgSymbology]);
 
   // ── Init map (once) ─────────────────────────────────────
   useEffect(() => {
@@ -413,7 +412,7 @@ export default function App() {
     const defaultRegion = regions.find(r => r.slug === "winnipeg") ?? regions[0];
 
     setSelectedRegion(defaultRegion.slug);
-    loadRegionTiles(map, defaultRegion.slug, tileVariant);
+    loadTiles(map, tileVariant);
     setFeatureCounts({ buildings: defaultRegion.nBuildings });
     if (defaultRegion.bbox) map.fitBounds(bboxToBounds(defaultRegion.bbox), { padding: 40, duration: 0 });
     else map.jumpTo({ center: defaultRegion.center, zoom: 11 });
@@ -439,7 +438,7 @@ export default function App() {
 
     applyBldgSymbology();
     setLoading(false);
-  }, [mapReady, regions, loadRegionTiles, applyBldgSymbology, tileVariant]);
+  }, [mapReady, regions, loadTiles, applyBldgSymbology, tileVariant]);
 
   useEffect(() => {
     const map = mapRef.current;

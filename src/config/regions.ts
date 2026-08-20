@@ -69,6 +69,13 @@ export async function fetchRegions(): Promise<RegionConfig[]> {
 // fetch is needed for the nochm variant.
 export type TileVariant = "tiles" | "tiles_nochm";
 
-export function pmtilesUrl(slug: string, variant: TileVariant = "tiles"): string {
-  return `pmtiles://${TILES_BASE_URL}/${variant}/${slug}/buildings.pmtiles`;
+// One merged, country-wide PMTiles archive per variant (z0-z18 — a low-zoom
+// overview pass tile-joined together with the per-region z8-z18 builds),
+// not 152 separate per-region files. PMTiles is designed for exactly this:
+// the client only range-requests the tiles it actually needs, so one large
+// archive costs nothing extra over many small ones, and "selecting a
+// region" becomes a pure camera move (see selectRegion in App.tsx) instead
+// of swapping the map source.
+export function pmtilesUrl(variant: TileVariant = "tiles"): string {
+  return `pmtiles://${TILES_BASE_URL}/${variant}/canada.pmtiles`;
 }

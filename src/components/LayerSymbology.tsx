@@ -61,6 +61,13 @@ export default function LayerSymbologyPanel({ label, symbology, onChange, layerT
         value={symbology.ramp}
         onChange={(v) => v && onChange({ ...symbology, ramp: v })}
         size="xs"
+        leftSection={
+          <div style={{ display: "flex", gap: 0 }}>
+            {generateColors(4, symbology.ramp as RampName).map((c, i) => (
+              <div key={i} style={{ width: 5, height: 14, background: c }} />
+            ))}
+          </div>
+        }
         renderOption={({ option }) => {
           const cols = generateColors(8, option.value as RampName);
           return (

@@ -79,3 +79,10 @@ export type TileVariant = "tiles" | "tiles_nochm";
 export function pmtilesUrl(variant: TileVariant = "tiles"): string {
   return `pmtiles://${TILES_BASE_URL}/${variant}/canada.pmtiles`;
 }
+
+// Per-region raw data, still exported by scripts/export_region_geojsonl.py
+// even though the map itself now reads the merged canada.pmtiles — one
+// newline-delimited GeoJSON Feature per line. Used by the download dialog.
+export function regionGeojsonlUrl(slug: string, variant: TileVariant = "tiles"): string {
+  return `${TILES_BASE_URL}/${variant}/${slug}/buildings.geojsonl`;
+}

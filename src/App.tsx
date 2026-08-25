@@ -10,12 +10,13 @@ import {
   IconSun, IconMoon, IconX,
   IconChevronLeft, IconChevronRight,
   IconTree, IconEye, IconEyeOff, IconMapPin,
-  IconPlus, IconMinus,
+  IconPlus, IconMinus, IconDownload,
 } from "@tabler/icons-react";
 import { Protocol } from "pmtiles";
 import LayerSymbologyPanel from "./components/LayerSymbology";
 import HierarchyView from "./components/HierarchyView";
 import type { LayoutMode } from "./components/HierarchyView";
+import DownloadDialog from "./components/DownloadDialog";
 import { generateColors } from "./utils/colors";
 import type { RampName } from "./utils/colors";
 import type { LayerSymbology, GlobalClusterSummary } from "./utils/types";
@@ -103,6 +104,7 @@ export default function App() {
   // below for which of the two is actually used where.
   const [nochmClusterSummary, setNochmClusterSummary] = useState<GlobalClusterSummary | null>(null);
   const [leftOpen, setLeftOpen] = useState(true);
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
   const [featureCounts, setFeatureCounts] = useState({ buildings: 0 });
   const [regions, setRegions] = useState<RegionConfig[]>([]);
@@ -515,6 +517,11 @@ export default function App() {
               <Group justify="space-between">
                 <Text fw={700} size="md">Urban Taxonomy</Text>
                 <Group gap={4}>
+                  <Tooltip label="Download building data">
+                    <ActionIcon variant="subtle" size="sm" onClick={() => setDownloadOpen(true)}>
+                      <IconDownload size={14} />
+                    </ActionIcon>
+                  </Tooltip>
                   <Tooltip label={rightOpen ? "Hide tree" : "Show tree"}>
                     <ActionIcon variant="subtle" size="sm" onClick={() => setRightOpen(v => !v)}>
                       <IconTree size={14} />
@@ -733,6 +740,14 @@ export default function App() {
           <Text size="lg" fw={600} c="white">Loading taxonomy…</Text>
         </div>
       )}
+
+      <DownloadDialog
+        opened={downloadOpen}
+        onClose={() => setDownloadOpen(false)}
+        regions={regions}
+        defaultSlug={selectedRegion}
+        defaultVariant={tileVariant}
+      />
     </div>
   );
 }

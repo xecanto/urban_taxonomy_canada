@@ -4,13 +4,13 @@ import gsap from "gsap";
 import {
   SegmentedControl, Stack, Text, Paper, ScrollArea,
   ActionIcon, useMantineColorScheme, Badge, Table,
-  Divider, Group, Accordion, Tooltip, Select, Checkbox,
+  Divider, Group, Accordion, Tooltip, Select, Checkbox, Anchor,
 } from "@mantine/core";
 import {
   IconSun, IconMoon, IconX,
   IconChevronLeft, IconChevronRight,
   IconTree, IconEye, IconEyeOff, IconMapPin,
-  IconPlus, IconMinus, IconDownload,
+  IconPlus, IconMinus, IconDownload, IconExternalLink,
 } from "@tabler/icons-react";
 import { Protocol } from "pmtiles";
 import LayerSymbologyPanel from "./components/LayerSymbology";
@@ -704,6 +704,19 @@ export default function App() {
                   </Accordion.Item>
                 )}
               </Accordion>
+
+              <Divider label="References" labelPosition="left" mt={4} />
+              <Stack gap={2}>
+                <Anchor href="https://festudio.ca/" target="_blank" rel="noopener noreferrer"
+                  size="xs" underline="hover" c="dimmed"
+                >
+                  <Group gap={4} wrap="nowrap">
+                    <Text size="xs" span>Studio: Future Elements Studio</Text>
+                    <IconExternalLink size={11} />
+                  </Group>
+                </Anchor>
+                <Text size="xs" c="dimmed" fs="italic">Research article: coming soon</Text>
+              </Stack>
             </Stack>
           </ScrollArea>
         </Paper>

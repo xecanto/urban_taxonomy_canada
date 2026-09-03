@@ -24,12 +24,30 @@ import { buildLegendRows, clusterKey, parseClusterKey, buildTaxonomyTree } from 
 import { fetchRegions, pmtilesUrl } from "./config/regions";
 import type { RegionConfig, TileVariant } from "./config/regions";
 
-const BASEMAPS: Record<string, { name: string; url: string }> = {
-  osm: { name: "OSM", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png" },
-  light: { name: "Light", url: "https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png" },
-  dark: { name: "Dark", url: "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png" },
-  satellite: { name: "Satellite", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" },
+// "raster" basemaps are wrapped in a one-layer style built locally (see
+// basemapStyle below); "style" basemaps point straight at a self-contained
+// MapLibre style.json (their own sources/sprite/glyphs) — CARTO's vector GL
+// styles, unlike their raster tile endpoints, don't require an API key.
+type Basemap =
+  | { name: string; type: "raster"; url: string; attribution: string }
+  | { name: string; type: "style"; url: string };
+
+const BASEMAPS: Record<string, Basemap> = {
+  osm: { name: "OSM", type: "raster", url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: "&copy; OpenStreetMap contributors" },
+  light: { name: "Light", type: "style", url: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json" },
+  dark: { name: "Dark", type: "style", url: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json" },
+  satellite: { name: "Satellite", type: "raster", url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", attribution: "&copy; Esri" },
 };
+
+function basemapStyle(key: string): string | maplibregl.StyleSpecification {
+  const b = BASEMAPS[key];
+  if (b.type === "style") return b.url;
+  return {
+    version: 8,
+    sources: { basemap: { type: "raster", tiles: [b.url], tileSize: 256, attribution: b.attribution } },
+    layers: [{ id: "basemap", type: "raster", source: "basemap" }],
+  };
+}
 
 const TAXONOMY_SOURCE = "taxonomy";
 // Register the pmtiles:// protocol with MapLibre once at module load.
@@ -80,7 +98,9 @@ export default function App() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const bldgSymRef = useRef<LayerSymbology>(null!);
+  const tileVariantRef = useRef<TileVariant>("tiles");
   const initializedRef = useRef(false);
+  const basemapMountedRef = useRef(false);
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
@@ -132,6 +152,7 @@ export default function App() {
   const leftResize = useResize(300, 220, 500, "left");
 
   bldgSymRef.current = bldgSym;
+  tileVariantRef.current = tileVariant;
 
   // CHM and no-CHM are separate clustering passes over different building
   // sets, so their real counts per cluster differ — the legend/map/tree all
@@ -378,16 +399,7 @@ export default function App() {
     if (!mapContainer.current) return;
     const map = new maplibregl.Map({
       container: mapContainer.current,
-      style: {
-        version: 8,
-        sources: {
-          basemap: {
-            type: "raster", tiles: [BASEMAPS[basemap].url],
-            tileSize: 256, attribution: "&copy; OpenStreetMap contributors",
-          },
-        },
-        layers: [{ id: "basemap", type: "raster", source: "basemap" }],
-      },
+      style: basemapStyle(basemap),
       center: [-96, 62], zoom: 3,
     });
     // top-right, not bottom-right: the Hierarchy Tree overlay now floats in
@@ -442,11 +454,23 @@ export default function App() {
     setLoading(false);
   }, [mapReady, regions, loadTiles, applyBldgSymbology, tileVariant]);
 
+  // Every basemap now potentially means a full style swap — light/dark are
+  // whole external MapLibre styles (own sources/sprite/glyphs), not just a
+  // tile URL — so setStyle() replaces the entire style and the buildings
+  // source/layers (not part of any basemap style) need re-adding once it's
+  // done loading. Skip the first run: the map was already constructed with
+  // this exact style in the init effect above.
   useEffect(() => {
+    if (!basemapMountedRef.current) { basemapMountedRef.current = true; return; }
     const map = mapRef.current;
-    if (!map?.getSource("basemap")) return;
-    (map.getSource("basemap") as maplibregl.RasterTileSource).setTiles([BASEMAPS[basemap].url]);
-  }, [basemap]);
+    if (!map) return;
+    map.setStyle(basemapStyle(basemap));
+    map.once("style.load", () => {
+      loadTiles(map, tileVariantRef.current);
+      applyBldgSymbology();
+      applyMapFilter();
+    });
+  }, [basemap, loadTiles, applyBldgSymbology, applyMapFilter]);
 
   // Base level changed (e.g. "8 clusters" -> "16 clusters") OR the CHM/
   // no-CHM dataset was swapped (activeClusterSummary is then a different

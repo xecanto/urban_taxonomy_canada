@@ -460,11 +460,25 @@ export default function App() {
   // source/layers (not part of any basemap style) need re-adding once it's
   // done loading. Skip the first run: the map was already constructed with
   // this exact style in the init effect above.
+  //
+  // { diff: false } is required here: MapLibre's default diff:true tries to
+  // patch the current style in place when the old/new styles are similar
+  // enough (e.g. switching between the two local raster wraps -- OSM and
+  // Satellite -- which differ only in their tile URL). A patched-in-place
+  // update does NOT refire "style.load" (that event is tied to a genuinely
+  // new Style instance), so the buildings layers -- removed by the diff
+  // because they aren't part of either style spec -- silently never got
+  // re-added. This was the cause of the buildings layer intermittently
+  // vanishing on Satellite/OSM specifically (structurally near-identical to
+  // each other) while Light/Dark (structurally very different full styles,
+  // always forcing a real reload) appeared to "just work". Forcing a full
+  // reload every time makes "style.load" fire reliably regardless of which
+  // two basemaps are involved.
   useEffect(() => {
     if (!basemapMountedRef.current) { basemapMountedRef.current = true; return; }
     const map = mapRef.current;
     if (!map) return;
-    map.setStyle(basemapStyle(basemap));
+    map.setStyle(basemapStyle(basemap), { diff: false });
     map.once("style.load", () => {
       loadTiles(map, tileVariantRef.current);
       applyBldgSymbology();
@@ -753,8 +767,8 @@ export default function App() {
       {/* ── Hierarchy Tree: small floating overlay, bottom-right of the
           map (not a docked sidebar) — shown/hidden via the tree icon in
           the left panel's header, no chrome of its own. ── */}
-      <div ref={rightRef} className="right-panel-wrapper"
-        style={{ width: treeMode === "vertical" ? 520 : 320 }}
+      <div ref={rightRef}
+        className={`right-panel-wrapper ${treeMode === "vertical" ? "right-panel-wrapper-vertical" : "right-panel-wrapper-radial"}`}
       >
         <div className={`right-panel ${treeMode === "radial" ? "right-panel-circle" : "right-panel-box"}`}>
           <HierarchyView

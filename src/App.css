@@ -22,14 +22,33 @@
 /* Small floating corner overlay, not a docked sidebar — sized to comfortably
    fit the circular layout (HierarchyView's own default) without needing to
    be resizable. Lifted clear of MapLibre's attribution strip at the very
-   bottom of the map. */
+   bottom of the map. Width comes from a mode-specific class (not an inline
+   style) so a media query can shrink it on narrow viewports without an
+   inline-style-vs-stylesheet specificity fight. */
 .right-panel-wrapper {
   position: absolute;
   bottom: 44px;
   right: 16px;
-  width: 320px;
   height: 320px;
   z-index: 8;
+}
+
+.right-panel-wrapper-radial { width: 320px; }
+.right-panel-wrapper-vertical { width: 520px; }
+
+/* Small screens: the fixed 320/520px sizing above was covering roughly half
+   the viewport (radial) or running off the right edge entirely (vertical,
+   520px on a ~375-430px phone). Cap both to the available width and shrink
+   the panel overall so it reads as a small overlay again, not most of the
+   screen. */
+@media (max-width: 640px) {
+  .right-panel-wrapper {
+    bottom: 12px;
+    right: 12px;
+    height: min(220px, calc(100vh - 160px));
+  }
+  .right-panel-wrapper-radial { width: min(220px, calc(100vw - 24px)); }
+  .right-panel-wrapper-vertical { width: calc(100vw - 24px); }
 }
 
 /* ── Panels fill their wrapper ──────────────────────────── */

@@ -1,0 +1,253 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@500;600;700;900&family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --brown: #3d150a;
+      --blue-dark: #0061b0;
+      --blue-light: #00a4e6;
+      --gold: #fdb414;
+      --paper: #fdfcfa;
+      --ink: #2a1108;
+      --ink-soft: #5a3d33;
+      --rule: #e4dbd4;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .serif { font-family: "Source Serif 4", Georgia, "Times New Roman", serif; }
+    .sans { font-family: "Public Sans", "Segoe UI", Arial, sans-serif; }
+    a { color: var(--blue-dark); text-decoration: underline; }
+    a:hover { color: var(--blue-light); }
+    .section-head {
+      font-family: "Source Serif 4", Georgia, serif;
+      font-weight: 700;
+      font-size: 52px;
+      color: var(--blue-dark);
+      margin: 0 0 16px 0;
+      letter-spacing: 0.5px;
+    }
+    .sub-head {
+      font-family: "Public Sans", sans-serif;
+      font-weight: 700;
+      font-size: 30px;
+      color: var(--brown);
+      margin: 0 0 12px 0;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .body-text {
+      font-family: "Public Sans", sans-serif;
+      font-weight: 400;
+      font-size: 29px;
+      line-height: 1.42;
+      color: var(--ink);
+      margin: 0 0 18px 0;
+    }
+    ul.plain { margin: 0 0 18px 0; padding: 0; list-style: none; }
+    ul.plain li {
+      font-family: "Public Sans", sans-serif;
+      font-size: 29px;
+      line-height: 1.38;
+      color: var(--ink);
+      padding-left: 40px;
+      position: relative;
+      margin-bottom: 13px;
+    }
+    ul.plain li::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 14px;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--blue-light);
+    }
+    .caption {
+      font-family: "Public Sans", sans-serif;
+      font-weight: 500;
+      font-size: 26px;
+      line-height: 1.4;
+      color: var(--ink-soft);
+      margin: 16px 0 40px 0;
+    }
+    .caption b { color: var(--brown); }
+  </style>
+</helmet>
+
+<div class="sans" style="width:3840px; background:var(--paper); display:flex; flex-direction:column;">
+
+  <!-- ===================== HEADER ===================== -->
+  <div style="background:var(--blue-dark); padding:64px 120px 44px 120px; display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:60px;">
+      <div style="flex:1;">
+        <h1 class="serif" style="margin:0 0 26px 0; font-size:130px; line-height:1.02; font-weight:900; color:#ffffff; letter-spacing:0.5px;">A Canada-Wide Urban Taxonomy</h1>
+        <div class="serif" style="font-size:44px; font-weight:500; color:#bfe6ff; line-height:1.3; max-width:2750px;">A hierarchical, data-driven classification of urban form across 152 Canadian metro areas &mdash; piloted in Winnipeg, scaled nationwide</div>
+      </div>
+      <img src="UM-logo-horizontal-reverse-rgb-sm.png" alt="University of Manitoba" style="width:620px; height:auto; flex-shrink:0; margin-top:8px;">
+    </div>
+
+    <div style="height:2px; background:rgba(255,255,255,0.25); margin:36px 0 28px 0;"></div>
+
+    <div style="display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:20px;">
+      <div style="font-size:38px; color:#ffffff; font-weight:600;">AbdurRehman Goheer &nbsp;·&nbsp; Hassibe G&oacute;mez &nbsp;·&nbsp; Jaqueline de la Cruz</div>
+      <div style="font-size:30px; color:#bfe6ff; font-weight:500;">Supervised by Dr. Yuhao Lu &nbsp;|&nbsp; Faculty of Architecture, University of Manitoba</div>
+    </div>
+    <div style="font-size:28px; color:var(--gold); font-weight:700; margin-top:14px; letter-spacing:0.5px;">UNDERGRADUATE RESEARCH SHOWCASE &mdash; OCTOBER 22, 2026</div>
+  </div>
+
+  <div style="height:20px; background:var(--gold);"></div>
+
+  <!-- ===================== HERO: RADIAL TAXONOMY + COVERAGE MAP ===================== -->
+  <div style="padding:40px 120px 16px 120px;">
+    <h2 class="section-head" style="text-align:center; font-size:58px;">One Taxonomy, 152 Metro Areas</h2>
+    <div style="display:flex; align-items:flex-start; gap:44px; margin-top:10px;">
+      <div style="flex:0 0 980px; display:flex; flex-direction:column;">
+        <img src="cluster_map-sm.jpg" alt="Map of all 152 classified Canadian metro areas, coast to coast" style="width:100%; height:auto; display:block; border:1px solid var(--rule);">
+        <div class="caption" style="font-size:22px; margin-top:10px;">Every filled region is a CMA/CA this pipeline has classified &mdash; shaded by building count. <b>152 in total</b>, roughly 9.6 million buildings, one shared taxonomy from Vancouver to Halifax.</div>
+      </div>
+      <div style="flex:1; display:flex; flex-direction:column;">
+        <img src="radial_taxonomy-sm.jpg" alt="Radial hierarchical taxonomy of Canadian urban form" style="width:100%; height:auto; display:block;">
+        <div class="caption" style="font-size:22px; margin-top:10px;">The classification tree (levels 1&ndash;5 of 7), coloured by top-level fabric type, with morphometric character rings, a canopy-cover ring unique to this Canadian dataset, abundance, and real footprint silhouettes for each of the 32 leaf clusters.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== BODY (3 columns) ===================== -->
+  <div style="display:grid; grid-template-columns: 1fr 1.15fr 1fr; gap:80px; padding:20px 120px 36px 120px;">
+
+    <!-- COLUMN 1 -->
+    <div style="display:flex; flex-direction:column;">
+      <h2 class="section-head">Background</h2>
+      <p class="body-text">Cities are usually mapped by land use or by coarse climate-zone categories &mdash; labels that describe function, not form. The <b>Urban Taxonomy</b> framework (Fleischmann et al., 2022) instead measures the built environment directly &mdash; building shapes, plot patterns, street geometry &mdash; and lets a classification emerge bottom-up from those measurements, at every scale from a single block to an entire country.</p>
+
+      <div style="background:#fff; border-left:10px solid var(--gold); padding:32px 36px; margin:0 0 40px 0; box-shadow:0 2px 10px rgba(61,21,10,0.06);">
+        <div class="sub-head" style="color:var(--blue-dark); font-size:24px; margin-bottom:10px;">Research Question</div>
+        <div class="serif" style="font-size:30px; line-height:1.42; color:var(--brown); font-weight:600;">Does this European framework scale to a country as large and geographically diverse as Canada &mdash; and can it be sharpened with data Europe's open records don't offer: building height and satellite-derived canopy height?</div>
+      </div>
+
+      <h3 class="sub-head">Data</h3>
+      <ul class="plain">
+        <li>CMA/CA boundaries &mdash; Statistics Canada</li>
+        <li>Building footprints, height &amp; volume &mdash; Open Building Population Layers Canada v3 (OBPL&#8209;CA&#8209;v3)</li>
+        <li>Street network &mdash; OpenStreetMap (Geofabrik Canada extract)</li>
+        <li>Canopy height &amp; cover &mdash; Meta CHM v2, sampled in a buffer around each building</li>
+        <li>Study area &mdash; 152 Census Metropolitan Areas &amp; Agglomerations across Canada, piloted in Winnipeg, Manitoba</li>
+      </ul>
+    </div>
+
+    <!-- COLUMN 2 -->
+    <div style="display:flex; flex-direction:column;">
+      <h2 class="section-head">Method</h2>
+
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px;">
+        <!-- step 1 -->
+        <div style="background:#fff; border-top:8px solid var(--blue-dark); padding:24px 22px; box-shadow:0 2px 8px rgba(61,21,10,0.06);">
+          <div class="serif" style="font-size:38px; font-weight:800; color:var(--blue-dark);">1</div>
+          <div style="font-size:23px; font-weight:700; color:var(--brown); margin:6px 0 5px 0; text-transform:uppercase;">Preprocess</div>
+          <div style="font-size:21px; line-height:1.35; color:var(--ink-soft);">Clean &amp; standardize footprints and street geometry, per metro area</div>
+        </div>
+        <!-- step 2 -->
+        <div style="background:#fff; border-top:8px solid var(--blue-dark); padding:24px 22px; box-shadow:0 2px 8px rgba(61,21,10,0.06);">
+          <div class="serif" style="font-size:38px; font-weight:800; color:var(--blue-dark);">2</div>
+          <div style="font-size:23px; font-weight:700; color:var(--brown); margin:6px 0 5px 0; text-transform:uppercase;">Tessellate</div>
+          <div style="font-size:21px; line-height:1.35; color:var(--ink-soft);">Divide each city into building-linked morphological cells</div>
+        </div>
+        <!-- step 3 -->
+        <div style="background:#fff; border-top:8px solid var(--blue-light); padding:24px 22px; box-shadow:0 2px 8px rgba(61,21,10,0.06);">
+          <div class="serif" style="font-size:38px; font-weight:800; color:var(--blue-light);">3</div>
+          <div style="font-size:23px; font-weight:700; color:var(--brown); margin:6px 0 5px 0; text-transform:uppercase;">Measure</div>
+          <div style="font-size:21px; line-height:1.35; color:var(--ink-soft);">Morphometric characters per cell, plus building height, volume &amp; canopy stats</div>
+        </div>
+        <!-- step 4 -->
+        <div style="background:#fff; border-top:8px solid var(--blue-light); padding:24px 22px; box-shadow:0 2px 8px rgba(61,21,10,0.06);">
+          <div class="serif" style="font-size:38px; font-weight:800; color:var(--blue-light);">4</div>
+          <div style="font-size:23px; font-weight:700; color:var(--brown); margin:6px 0 5px 0; text-transform:uppercase;">Delineate</div>
+          <div style="font-size:21px; line-height:1.35; color:var(--ink-soft);">Group adjacent similar cells into morphotopes</div>
+        </div>
+        <!-- step 5 -->
+        <div style="background:#fff; border-top:8px solid var(--gold); padding:24px 22px; box-shadow:0 2px 8px rgba(61,21,10,0.06);">
+          <div class="serif" style="font-size:38px; font-weight:800; color:#c98a00;">5</div>
+          <div style="font-size:23px; font-weight:700; color:var(--brown); margin:6px 0 5px 0; text-transform:uppercase;">Classify</div>
+          <div style="font-size:21px; line-height:1.35; color:var(--ink-soft);">Ward clustering of ALL 152 metros' morphotopes into ONE shared tree, 7 levels (2&rarr;128 types)</div>
+        </div>
+        <!-- step 6 -->
+        <div style="background:#fff; border-top:8px solid var(--gold); padding:24px 22px; box-shadow:0 2px 8px rgba(61,21,10,0.06);">
+          <div class="serif" style="font-size:38px; font-weight:800; color:#c98a00;">6</div>
+          <div style="font-size:23px; font-weight:700; color:var(--brown); margin:6px 0 5px 0; text-transform:uppercase;">Publish</div>
+          <div style="font-size:21px; line-height:1.35; color:var(--ink-soft);">Reassign edge cases &amp; export to a national interactive web map</div>
+        </div>
+      </div>
+
+      <h3 class="sub-head" style="margin-top:44px;">Results</h3>
+      <ul class="plain">
+        <li>One taxonomy, built once across all 152 metro areas, resolves into a full morphological hierarchy &mdash; from 2 broad classes to 128 fine-grained types</li>
+        <li>Within a single city &mdash; Winnipeg's dense downtown grid, older streetcar neighbourhoods, and post-war subdivisions &mdash; separate cleanly on form alone, using that same shared national taxonomy</li>
+      </ul>
+    </div>
+
+    <!-- COLUMN 3 -->
+    <div style="display:flex; flex-direction:column;">
+      <h2 class="section-head">Conclusions</h2>
+      <p class="body-text">This is among the first applications of theory-driven, hierarchical urban-form classification at a national scale &mdash; and the first to combine it with 3D building form and canopy data. Piloted in Winnipeg and scaled to all 152 Canadian metro areas, the resulting taxonomy is published in two variants (with and without canopy structure) through a purpose-built interactive map, giving planners and residents a reproducible, quantitative language for how Canadian cities are actually built.</p>
+
+      <div style="background:#fff; border-left:10px solid var(--blue-light); padding:32px 36px; margin:0 0 40px 0; box-shadow:0 2px 10px rgba(61,21,10,0.06);">
+        <div class="sub-head" style="color:var(--blue-dark); font-size:24px; margin-bottom:10px;">Why It Matters</div>
+        <div class="serif" style="font-size:28px; line-height:1.42; color:var(--brown); font-weight:600;">Building height, volume &amp; canopy data let the classification split high-rise from low-rise, and leafy from bare, fabric that looks identical in a 2D footprint &mdash; distinctions the original European method cannot make.</div>
+      </div>
+
+      <h3 class="sub-head">Next Steps</h3>
+      <ul class="plain">
+        <li>Extend coverage to the ~24% of Canada outside any CMA/CA boundary</li>
+        <li>Fold canopy structure directly into the clustering, not just the character set</li>
+        <li>Validate the taxonomy against zoning &amp; land-use records</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ===================== CANADA-ONLY DATA STRIP ===================== -->
+  <div style="padding:12px 120px 34px 120px;">
+    <h2 class="section-head" style="text-align:center; font-size:46px;">What This Canadian Run Adds</h2>
+    <div class="caption" style="text-align:center; font-size:23px; max-width:2900px; margin:0 auto 16px auto;">The original European Urban Taxonomy had no building height, volume, or canopy data. Relative to the other 152 CMAs/CAs, each of the 8 top-level fabric types shows a distinct signature across these Canada-only characters:</div>
+    <img src="feature_matrix_canada_only-sm.jpg" alt="Heatmap of Canada-only morphometric characters by fabric type" style="width:100%; height:auto; display:block; border:1px solid var(--rule);">
+  </div>
+
+  <!-- ===================== INTERACTIVE VIEWER STRIP ===================== -->
+  <div style="background:#eef2f6; padding:44px 120px; display:grid; grid-template-columns: 1.1fr 1.5fr; gap:96px; align-items:center;">
+    <div>
+      <h2 class="section-head">An Interactive Map of the Taxonomy</h2>
+      <p class="body-text" style="margin-bottom:0;">The full national classification &mdash; roughly 9.6 million buildings across 152 metro areas, every hierarchy level, with and without canopy data &mdash; is published in a purpose-built web viewer: pan and zoom any Canadian city, recolor buildings by any level of the taxonomy, and trace how a single block's classification unfolds up the tree in a live radial dendrogram &mdash; the same view shown here.</p>
+    </div>
+    <img src="viewer_screenshot-sm.jpg" alt="Interactive urban taxonomy web viewer" style="width:100%; height:auto; display:block; border:1px solid var(--rule); box-shadow:0 4px 20px rgba(61,21,10,0.12);">
+  </div>
+
+  <!-- ===================== FOOTER ===================== -->
+  <div style="background:var(--brown); padding:46px 120px; display:grid; grid-template-columns: 620px 1fr; gap:80px; align-items:start;">
+    <img src="UM-logo-horizontal-reverse-rgb-sm.png" alt="University of Manitoba" style="width:100%; height:auto; align-self:center;">
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:70px;">
+      <div>
+        <div style="font-size:26px; font-weight:700; color:var(--gold); text-transform:uppercase; letter-spacing:1px; margin-bottom:14px;">Acknowledgments</div>
+        <div style="font-size:26px; line-height:1.5; color:#f1e6df;">Supervised by <b>Dr. Yuhao Lu</b>, Faculty of Architecture, University of Manitoba.</div>
+      </div>
+      <div>
+        <div style="font-size:26px; font-weight:700; color:var(--gold); text-transform:uppercase; letter-spacing:1px; margin-bottom:14px;">Method Adapted From</div>
+        <div style="font-size:24px; line-height:1.5; color:#f1e6df;">Fleischmann, M., Feliciotti, A., Romice, O., &amp; Porta, S. (2022). Methodological foundation of a numerical taxonomy of urban form. <i>Environment and Planning B: Urban Analytics and City Science</i>, 49(4), 1283&ndash;1299.</div>
+      </div>
+      <div style="grid-column: 1 / -1;">
+        <div style="font-size:26px; font-weight:700; color:var(--gold); text-transform:uppercase; letter-spacing:1px; margin-bottom:14px;">Built With</div>
+        <div style="font-size:24px; line-height:1.5; color:#f1e6df;">momepy &middot; PySAL &middot; GeoPandas &middot; scikit-learn &nbsp;&mdash;&nbsp; React &middot; MapLibre GL &middot; D3.js</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

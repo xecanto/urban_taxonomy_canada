@@ -1,0 +1,14 @@
+{
+  "hub_r": 0.46,
+  "ring_w": 0.035,
+  "n_rings": 5,
+  "abund_r0": 0.655,
+  "abund_r1": 0.735,
+  "thumb_r0": 0.7949999999999999,
+  "thumb_width": 0.13247016515540114,
+  "thumb_height": 0.4,
+  "outer_extent": 1.2449999999999999,
+  "axes_frac": 0.94,
+  "size_px": 8800,
+  "thumbnails": true
+}
